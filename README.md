@@ -39,9 +39,11 @@ bun run start
 
 On Linux, if you see a sandbox error when running as root, you can start the binary with `--no-sandbox` (only when you understand the tradeoff), e.g. `bun x electron . --no-sandbox`.
 
-## Global shortcut
+## Global shortcut and window
 
-The app tries **⌘+P+R** (macOS) or **Ctrl+P+R** (Windows/Linux) first. If that cannot be registered, it falls back to **⌘+Shift+P** / **Ctrl+Shift+P**. The footer of the window shows the active shortcut.
+- **Shortcut:** **⌘+Shift+P** (macOS) or **Ctrl+Shift+P** (Windows/Linux). A three-key shortcut like `⌘+P+R` is not used: on macOS, Electron can treat it like **⌘+R** and conflict with **Refresh**, so only **⌘+Shift+P** is registered. If that slot is taken, the app falls back to **⌘+Option+P** / **Ctrl+Alt+P**. A one-line note in the window shows the active shortcut.
+- **UI:** Frameless, wide “composer” bar (like a chat input) with one main text field; **Escape** hides the window. The app **keeps running** in the background and **keeps your search state**; use the global shortcut again to show the palette. **Drag** the top edge of the window to move it.
+- **Quit:** Use the system **Quit** command (e.g. **⌘+Q** on Mac, or close from the taskbar on Windows).
 
 ## What v0.1 does not include
 

@@ -1,9 +1,8 @@
 const searchInput = document.getElementById('query');
 const resultsEl = document.getElementById('results');
 const hintEl = document.getElementById('hint');
-const authBadge = document.getElementById('auth-badge');
 const btnAuth = document.getElementById('btn-auth');
-const shortcutHint = document.getElementById('shortcut-hint');
+const shortcutNote = document.getElementById('shortcut-note');
 const appEl = document.getElementById('app');
 
 let items = [];
@@ -12,6 +11,17 @@ let debounceTimer = null;
 
 function setHint(text) {
   hintEl.textContent = text ?? '';
+  updateWindowHeight();
+}
+
+function updateWindowHeight() {
+  requestAnimationFrame(() => {
+    if (!appEl.classList.contains('hidden')) {
+      const rect = appEl.getBoundingClientRect();
+      const h = Math.ceil(rect.height) + 24;
+      window.gitcp.setPaletteHeight(h);
+    }
+  });
 }
 
 function renderResults() {
@@ -41,6 +51,7 @@ function renderResults() {
     });
     resultsEl.appendChild(li);
   });
+  updateWindowHeight();
 }
 
 async function openSelected() {
@@ -78,11 +89,11 @@ function scheduleSearch() {
 
 function updateAuthUi(status) {
   if (status?.loggedIn) {
-    authBadge.textContent = status.login ? `Signed in as ${status.login}` : 'Signed in';
-    btnAuth.textContent = 'Sign out';
+    btnAuth.textContent = status.login ? `Sign out (${status.login})` : 'Sign out';
+    btnAuth.title = 'Sign out of GitHub';
   } else {
-    authBadge.textContent = 'Not signed in';
-    btnAuth.textContent = 'Sign in with GitHub';
+    btnAuth.textContent = 'Sign in';
+    btnAuth.title = 'Sign in with GitHub';
   }
 }
 
@@ -120,7 +131,7 @@ searchInput.addEventListener('keydown', (e) => {
     void openSelected();
   } else if (e.key === 'Escape') {
     e.preventDefault();
-    searchInput.blur();
+    void window.gitcp.hide();
   }
 });
 
@@ -134,15 +145,17 @@ window.gitcp.onAuthChanged((state) => updateAuthUi(state));
 window.gitcp.onFocusSearch(() => {
   searchInput.focus();
   searchInput.select();
+  updateWindowHeight();
 });
 
 Promise.all([window.gitcp.authStatus(), window.gitcp.shortcutInfo()]).then(([status, sc]) => {
   updateAuthUi(status);
   if (sc?.registered && sc?.accelerator) {
-    shortcutHint.textContent = `Shortcut: ${sc.accelerator}`;
-  } else if (sc?.fallback) {
-    shortcutHint.textContent = `Shortcut: ${sc.fallback} (${sc.primaryFailed ? 'fallback' : ''})`;
+    shortcutNote.textContent = sc.primaryFailed
+      ? `Shortcut: ${sc.accelerator} (${sc.primary} was unavailable)`
+      : `Shortcut: ${sc.accelerator}`;
   }
   appEl.classList.remove('hidden');
   searchInput.focus();
+  updateWindowHeight();
 });

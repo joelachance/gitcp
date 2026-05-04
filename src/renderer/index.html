@@ -9,23 +9,22 @@
   </head>
   <body>
     <div id="app" class="hidden">
-      <header class="bar">
-        <span class="brand">GitCP</span>
-        <span id="auth-badge" class="badge"></span>
-        <button type="button" id="btn-auth" class="btn-auth"></button>
-      </header>
-      <input
-        id="query"
-        type="search"
-        placeholder="Search issues & PRs on GitHub…"
-        autocomplete="off"
-        spellcheck="false"
-      />
-      <div id="hint" class="hint"></div>
-      <ul id="results" class="results" role="listbox" aria-label="Search results"></ul>
-      <footer class="footer">
-        <span id="shortcut-hint"></span>
-      </footer>
+      <div class="drag-strip" aria-hidden="true"></div>
+      <div class="shell">
+        <div class="composer">
+          <input
+            id="query"
+            type="text"
+            placeholder="Ask GitHub… search issues & pull requests"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button type="button" id="btn-auth" class="btn-auth"></button>
+        </div>
+        <div id="hint" class="hint"></div>
+        <ul id="results" class="results" role="listbox" aria-label="Search results"></ul>
+        <p id="shortcut-note" class="shortcut-note"></p>
+      </div>
     </div>
     <script type="module" src="./renderer.js"></script>
   </body>

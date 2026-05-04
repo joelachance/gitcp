@@ -17,4 +17,6 @@ contextBridge.exposeInMainWorld('gitcp', {
     return () => ipcRenderer.removeListener('gitcp:focus-search', listener);
   },
   shortcutInfo: () => ipcRenderer.invoke('gitcp:shortcut-info'),
+  hide: () => ipcRenderer.invoke('gitcp:hide'),
+  setPaletteHeight: (heightPx) => ipcRenderer.invoke('gitcp:set-palette-height', heightPx),
 });

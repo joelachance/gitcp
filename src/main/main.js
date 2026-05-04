@@ -11,10 +11,19 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
-const PRIMARY_ACCELERATOR = process.platform === 'darwin' ? 'Command+P+R' : 'Control+P+R';
-const FALLBACK_ACCELERATOR = process.platform === 'darwin' ? 'Command+Shift+P' : 'Control+Shift+P';
+
+/**
+ * macOS: Electron does not parse `Command+P+R` as a three-key chord reliably; it can
+ * overlap `Command+R` (refresh) and open GitCP when only ⌘R is pressed. Use ⌘⇧P / Ctrl+Shift+P.
+ */
+const PRIMARY_ACCELERATOR =
+  process.platform === 'darwin' ? 'Command+Shift+P' : 'Control+Shift+P';
+const FALLBACK_ACCELERATOR =
+  process.platform === 'darwin' ? 'Command+Alt+P' : 'Control+Alt+P';
+
 let activeShortcut = null;
 let usedFallback = false;
+let appIsQuitting = false;
 
 function getPreloadPath() {
   return path.join(__dirname, '../preload/preload.js');
@@ -39,14 +48,23 @@ function showPalette() {
   mainWindow.webContents.send('gitcp:focus-search');
 }
 
+function hidePalette() {
+  if (!mainWindow) return;
+  mainWindow.hide();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 640,
-    height: 480,
+    width: 720,
+    height: 120,
+    minWidth: 480,
+    minHeight: 96,
+    maxHeight: 520,
     show: false,
-    frame: true,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
     title: 'GitCP',
-    backgroundColor: '#0d1117',
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,
@@ -61,16 +79,16 @@ function createWindow() {
   });
 
   mainWindow.on('close', (e) => {
-    if (process.platform === 'darwin') {
+    if (!appIsQuitting) {
       e.preventDefault();
-      mainWindow.hide();
+      hidePalette();
     }
   });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
 }
+
+app.on('before-quit', () => {
+  appIsQuitting = true;
+});
 
 function registerGlobalShortcut() {
   const tryRegister = (acc) => globalShortcut.register(acc, showPalette);
@@ -160,6 +178,17 @@ function setupIpc() {
     accelerator: activeShortcut,
     primaryFailed: usedFallback,
   }));
+
+  ipcMain.handle('gitcp:hide', () => {
+    hidePalette();
+  });
+
+  ipcMain.handle('gitcp:set-palette-height', (_e, heightPx) => {
+    if (!mainWindow || typeof heightPx !== 'number' || !Number.isFinite(heightPx)) return;
+    const [w] = mainWindow.getContentSize();
+    const h = Math.min(520, Math.max(96, Math.round(heightPx)));
+    mainWindow.setContentSize(Math.max(w, 480), h);
+  });
 }
 
 app.whenReady().then(() => {
@@ -181,7 +210,5 @@ app.on('will-quit', () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  /* Window is hidden, not destroyed — keep running so the global shortcut still works. */
 });
