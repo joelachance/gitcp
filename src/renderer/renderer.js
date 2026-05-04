@@ -55,6 +55,9 @@ let reposBrowseAnchorKey = '';
 /** Only the latest `runSearch` may turn off the loading spinner (overlapping async). */
 let loadSeq = 0;
 
+/** Last `/theme` picker visibility — used to restore the committed theme when leaving that mode. */
+let themePickerWasOpen = false;
+
 function api() {
   return window.gitcp;
 }
@@ -318,6 +321,15 @@ function buildReposLocalFilterText(inputLine) {
   return [filterText, ...pillTerms].filter(Boolean).join(' ');
 }
 
+/**
+ * Same qualifier pills as `/issues` and `/repos`, combined with `/ci owner/repo` trailing text.
+ * @param {{ filterText: string }} repoParsed
+ */
+function buildRepoViewLocalFilterText(repoParsed) {
+  const pillTerms = searchFilters.map((f) => f.value);
+  return [repoParsed.filterText, ...pillTerms].filter(Boolean).join(' ');
+}
+
 function isPrCommand(trimmed) {
   const lower = trimmed.toLowerCase();
   if (lower === '/prs' || lower.startsWith('/prs ')) return true;
@@ -352,9 +364,28 @@ function buildThemePickerItems(trimmed) {
   }));
 }
 
-function applyTheme(themeId) {
+function setThemeOnDom(themeId) {
   if (!GITCP_THEMES.some((t) => t.id === themeId)) return;
   document.documentElement.setAttribute('data-theme', themeId);
+}
+
+function getCommittedThemeId() {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved && GITCP_THEMES.some((t) => t.id === saved)) return saved;
+  } catch {
+    /* ignore */
+  }
+  return 'github';
+}
+
+function restoreCommittedTheme() {
+  setThemeOnDom(getCommittedThemeId());
+}
+
+/** Persist + DOM (Enter, click). */
+function applyTheme(themeId) {
+  setThemeOnDom(themeId);
   try {
     localStorage.setItem(THEME_STORAGE_KEY, themeId);
   } catch {
@@ -362,15 +393,19 @@ function applyTheme(themeId) {
   }
 }
 
-function initStoredTheme() {
-  try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved && GITCP_THEMES.some((t) => t.id === saved)) {
-      document.documentElement.setAttribute('data-theme', saved);
-    }
-  } catch {
-    /* ignore */
+/** Live preview while `/theme` list is focused (j/k, arrows); no localStorage. */
+function previewThemeSelection() {
+  if (!items.length || !items[0].__themeOption) return;
+  if (activeIndex < 0 || activeIndex >= items.length) {
+    restoreCommittedTheme();
+    return;
   }
+  const row = items[activeIndex];
+  if (row?.__themeOption) setThemeOnDom(row.themeId);
+}
+
+function initStoredTheme() {
+  restoreCommittedTheme();
 }
 
 function prCommandFilterText(trimmed) {
@@ -653,7 +688,10 @@ async function handleRepoMenuSelection(row) {
       return;
     }
     repoBrowseState = { step: 'list', fullName, kind, htmlUrl };
-    items = result.rows;
+    const line = searchInput.value.trim();
+    const combinedFilter = buildReposLocalFilterText(line);
+    const filtered = filterRepoViewRows(result.rows, combinedFilter);
+    items = filtered;
     activeIndex = items.length ? 0 : -1;
     setHint(hintForRepoBrowseSublist(items.length, kind, fullName), { muted: true });
     renderResults();
@@ -689,7 +727,10 @@ async function refreshRepoBrowseSublist({ forceSearchRefresh = false } = {}) {
       renderResults();
       return;
     }
-    items = result.rows;
+    const line = searchInput.value.trim();
+    const combinedFilter = buildReposLocalFilterText(line);
+    const filtered = filterRepoViewRows(result.rows, combinedFilter);
+    items = filtered;
     activeIndex = items.length ? 0 : -1;
     setHint(hintForRepoBrowseSublist(items.length, kind, fullName), { muted: true });
     renderResults();
@@ -951,12 +992,20 @@ async function runSearch(options = {}) {
   };
 
   const inputLine = searchInput.value.trim();
-  if (isThemeCommand(inputLine)) {
+  const inThemePicker = isThemeCommand(inputLine);
+  if (themePickerWasOpen && !inThemePicker) {
+    restoreCommittedTheme();
+  }
+  themePickerWasOpen = inThemePicker;
+
+  if (inThemePicker) {
     items = buildThemePickerItems(inputLine);
     activeIndex = items.length ? 0 : -1;
     setHint(items.length ? '' : 'No matching themes', { muted: !items.length });
     setLoading(false);
     renderResults();
+    if (items.length) previewThemeSelection();
+    else restoreCommittedTheme();
     updateRefreshHint();
     return;
   }
@@ -1196,7 +1245,8 @@ async function runSearch(options = {}) {
         ...r,
         __repoView: true,
       }));
-      const filtered = filterRepoViewRows(rows, repoParsed.filterText);
+      const combinedFilter = buildRepoViewLocalFilterText(repoParsed);
+      const filtered = filterRepoViewRows(rows, combinedFilter);
       items = filtered;
       activeIndex = items.length ? 0 : -1;
       const total = rows.length;
@@ -1210,7 +1260,7 @@ async function runSearch(options = {}) {
         activity: 'event',
       };
       const noun = labels[repoParsed.kind] ?? 'item';
-      if (repoParsed.filterText) {
+      if (combinedFilter) {
         setHint(
           items.length
             ? `${items.length} of ${total} ${noun}${total === 1 ? '' : 's'} match`
@@ -1389,12 +1439,14 @@ searchInput.addEventListener('keydown', (e) => {
     if (items.length === 0) return;
     activeIndex = Math.min(activeIndex + 1, items.length - 1);
     renderResults();
+    previewThemeSelection();
     scrollActiveIntoView();
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
     if (items.length === 0) return;
     activeIndex = Math.max(activeIndex - 1, 0);
     renderResults();
+    previewThemeSelection();
     scrollActiveIntoView();
   } else if (
     items.length > 0 &&
@@ -1407,6 +1459,7 @@ searchInput.addEventListener('keydown', (e) => {
       activeIndex = Math.max(activeIndex - 1, 0);
     }
     renderResults();
+    previewThemeSelection();
     scrollActiveIntoView();
   } else if (e.key === 'Enter') {
     e.preventDefault();
@@ -1423,6 +1476,9 @@ searchInput.addEventListener('keydown', (e) => {
       // Menu → back to `/repos` list.
       exitRepoBrowse();
     } else {
+      if (isThemeCommand(searchInput.value.trim())) {
+        restoreCommittedTheme();
+      }
       void api().hide();
     }
   }
