@@ -1,17 +1,4 @@
-import createLucideSvg from '../../node_modules/lucide/dist/esm/createElement.mjs';
-import Activity from '../../node_modules/lucide/dist/esm/icons/activity.mjs';
-import BookOpen from '../../node_modules/lucide/dist/esm/icons/book-open.mjs';
-import CircleCheck from '../../node_modules/lucide/dist/esm/icons/circle-check.mjs';
-import CircleDot from '../../node_modules/lucide/dist/esm/icons/circle-dot.mjs';
-import GitBranch from '../../node_modules/lucide/dist/esm/icons/git-branch.mjs';
-import GitCommit from '../../node_modules/lucide/dist/esm/icons/git-commit.mjs';
-import GitMerge from '../../node_modules/lucide/dist/esm/icons/git-merge.mjs';
-import GitPullRequest from '../../node_modules/lucide/dist/esm/icons/git-pull-request.mjs';
-import GitPullRequestClosed from '../../node_modules/lucide/dist/esm/icons/git-pull-request-closed.mjs';
-import GitPullRequestDraft from '../../node_modules/lucide/dist/esm/icons/git-pull-request-draft.mjs';
-import Package from '../../node_modules/lucide/dist/esm/icons/package.mjs';
-import Tag from '../../node_modules/lucide/dist/esm/icons/tag.mjs';
-import Workflow from '../../node_modules/lucide/dist/esm/icons/workflow.mjs';
+import { resultIcon, Svg } from './icons.js';
 
 const searchInput = document.getElementById('query');
 const resultsEl = document.getElementById('results');
@@ -38,6 +25,22 @@ let issuesListCache = null;
 
 /** Full PR list when using `/pr` or `/prs` (open + closed); reused while the query stays in that mode. */
 let prsListCache = null;
+
+/** Rows from `/repos` (repos + CI summary); reused while the query stays in that mode. */
+let reposListCache = null;
+
+/**
+ * `/repos` drill-down: selecting a catalog row (Enter) opens an in-app menu instead of GitHub.
+ * - `menu`: pick CI, activity, branches, etc. (`__repoMenuOption` rows).
+ * - `list`: `repoView` data for that choice; Enter on a row opens `html_url` in the browser.
+ * Esc: list → menu → back to the `/repos` result list. Changing the search line or filter pills
+ * invalidates the anchor and clears this state (next `/repos` run rebuilds the catalog).
+ * @type {null | { step: 'menu'; fullName: string; htmlUrl: string } | { step: 'list'; fullName: string; kind: string; htmlUrl: string }}
+ */
+let repoBrowseState = null;
+
+/** Value of `reposBrowseEffectiveKey()` when `enterRepoBrowseMenu` ran; edit → exit drill-down. */
+let reposBrowseAnchorKey = '';
 
 /** Only the latest `runSearch` may turn off the loading spinner (overlapping async). */
 let loadSeq = 0;
@@ -80,6 +83,12 @@ function updateRefreshHint() {
     updateWindowHeight();
     return;
   }
+  if (isReposCommand(trimmed)) {
+    resultsRefreshHintEl.textContent = `${refreshShortcutLabel()} to refresh`;
+    resultsRefreshHintEl.classList.remove('hidden');
+    updateWindowHeight();
+    return;
+  }
   const q = buildSearchQuery();
   if (!q) {
     resultsRefreshHintEl.textContent = '';
@@ -94,10 +103,20 @@ function updateRefreshHint() {
 
 function refreshSearch() {
   const inputLine = searchInput.value.trim();
+  // Drill-down: refresh the loaded repo sub-list only; do not clear `reposListCache` from the menu step.
+  if (repoBrowseState?.step === 'list') {
+    void refreshRepoBrowseSublist({ forceSearchRefresh: true });
+    return;
+  }
+  if (repoBrowseState) {
+    return;
+  }
   if (isIssuesCommand(inputLine)) {
     issuesListCache = null;
   } else if (isPrCommand(inputLine)) {
     prsListCache = null;
+  } else if (isReposCommand(inputLine)) {
+    reposListCache = null;
   }
   void runSearch({ forceSearchRefresh: true });
 }
@@ -131,19 +150,6 @@ function buildPrLocalFilterText(inputLine) {
   return [filterText, ...pillTerms].filter(Boolean).join(' ');
 }
 
-function lucideIcon(iconNode, statusClass) {
-  const svg = createLucideSvg(iconNode, {
-    width: 16,
-    height: 16,
-    'stroke-width': 2,
-    'aria-hidden': 'true',
-  });
-  const wrap = document.createElement('span');
-  wrap.className = `result-icon ${statusClass}`;
-  wrap.appendChild(svg);
-  return wrap;
-}
-
 /**
  * GitHub-style status: issues + PRs (open/closed/draft/merged).
  * @param {Record<string, unknown>} item
@@ -152,30 +158,30 @@ function statusIconForSearchItem(item) {
   const pr = item.pull_request;
   const mergedAt = pr?.merged_at ?? item.merged_at;
   if (pr && mergedAt) {
-    return { el: lucideIcon(GitMerge, 'result-icon--pr-merged'), label: 'Merged pull request' };
+    return { el: resultIcon('result-icon--pr-merged', Svg.prMerged), label: 'Merged pull request' };
   }
   if (pr) {
     if (item.state === 'open' && item.draft) {
       return {
-        el: lucideIcon(GitPullRequestDraft, 'result-icon--pr-draft'),
+        el: resultIcon('result-icon--pr-draft', Svg.prDraft),
         label: 'Draft pull request',
       };
     }
     if (item.state === 'open') {
       return {
-        el: lucideIcon(GitPullRequest, 'result-icon--pr-open'),
+        el: resultIcon('result-icon--pr-open', Svg.prOpen),
         label: 'Open pull request',
       };
     }
     return {
-      el: lucideIcon(GitPullRequestClosed, 'result-icon--pr-closed'),
+      el: resultIcon('result-icon--pr-closed', Svg.prClosed),
       label: 'Closed pull request',
     };
   }
   if (item.state === 'open') {
-    return { el: lucideIcon(CircleDot, 'result-icon--issue-open'), label: 'Open issue' };
+    return { el: resultIcon('result-icon--issue-open', Svg.issueOpen), label: 'Open issue' };
   }
-  return { el: lucideIcon(CircleCheck, 'result-icon--issue-closed'), label: 'Closed issue' };
+  return { el: resultIcon('result-icon--issue-closed', Svg.issueClosed), label: 'Closed issue' };
 }
 
 function renderFilterPills() {
@@ -262,6 +268,10 @@ const SLASH_COMMANDS = [
     description: 'Releases (needs owner/repo)',
   },
   {
+    command: '/repos',
+    description: 'Your repositories + whether GitHub Actions / workflows are set up',
+  },
+  {
     command: '/repo',
     description: 'Repository summary (needs owner/repo)',
   },
@@ -278,6 +288,20 @@ const SLASH_COMMANDS = [
 function isIssuesCommand(trimmed) {
   const lower = trimmed.toLowerCase();
   return lower === '/issues' || lower.startsWith('/issues ');
+}
+
+function isReposCommand(trimmed) {
+  const lower = trimmed.toLowerCase();
+  return lower === '/repos' || lower.startsWith('/repos ');
+}
+
+function buildReposLocalFilterText(inputLine) {
+  const filterText =
+    inputLine === '/repos' || !inputLine.startsWith('/repos ')
+      ? ''
+      : inputLine.slice('/repos '.length).trim();
+  const pillTerms = searchFilters.map((f) => f.value);
+  return [filterText, ...pillTerms].filter(Boolean).join(' ');
 }
 
 function isPrCommand(trimmed) {
@@ -329,6 +353,7 @@ function isRepoViewIncomplete(trimmed) {
 function shouldShowSlashCommands(trimmed) {
   if (!trimmed.startsWith('/')) return false;
   if (isIssuesCommand(trimmed)) return false;
+  if (isReposCommand(trimmed)) return false;
   if (isPrCommand(trimmed)) return false;
   if (parseRepoViewCommand(trimmed)) return false;
   if (isRepoViewIncomplete(trimmed)) return false;
@@ -370,27 +395,272 @@ function filterRepoViewRows(list, searchText) {
   });
 }
 
+// --- `/repos` drill-down (menu + repoView preview lists) ---
+
+/** Stable key for “same `/repos` query context”: input line + qualifier pills. */
+function reposBrowseEffectiveKey() {
+  const line = searchInput.value.trim();
+  const pillKey = searchFilters.map((f) => `${f.kind}:${f.value}`).sort().join(',');
+  return `${line}|${pillKey}`;
+}
+
+/** SVG fragment for each menu row (`open`, `ci`, `activity`, …). */
+function iconSvgForRepoMenuAction(action) {
+  switch (action) {
+    case 'open':
+      return Svg.repo;
+    case 'repo':
+      return Svg.repo;
+    case 'ci':
+      return Svg.ci;
+    case 'activity':
+      return Svg.activity;
+    case 'branches':
+      return Svg.branch;
+    case 'commits':
+      return Svg.commit;
+    case 'releases':
+      return Svg.release;
+    case 'tags':
+      return Svg.tag;
+    default:
+      return Svg.repo;
+  }
+}
+
+/** Enter drill-down from a `repos-catalog` row (`row.title` is `owner/repo`). */
+function enterRepoBrowseMenu(fullName, htmlUrl) {
+  reposBrowseAnchorKey = reposBrowseEffectiveKey();
+  repoBrowseState = { step: 'menu', fullName, htmlUrl };
+  buildRepoBrowseMenuItems();
+}
+
+/** Populate `items` with synthetic menu rows (`__repoMenuOption`); maps to `repoView` kinds in main. */
+function buildRepoBrowseMenuItems() {
+  if (repoBrowseState?.step !== 'menu') return;
+  const { fullName, htmlUrl } = repoBrowseState;
+  const opts = [
+    { action: 'open', title: 'Open repository on GitHub', blurb: 'Main repo page' },
+    { action: 'repo', title: 'Repository summary', blurb: 'Stars, language, description' },
+    { action: 'ci', title: 'Workflow runs (CI)', blurb: 'Recent Actions runs' },
+    { action: 'activity', title: 'Activity', blurb: 'Recent events' },
+    { action: 'branches', title: 'Branches', blurb: 'Branch tips' },
+    { action: 'commits', title: 'Commits', blurb: 'Recent commits on default branch' },
+    { action: 'releases', title: 'Releases', blurb: 'Published releases' },
+    { action: 'tags', title: 'Tags', blurb: 'Git tags' },
+  ];
+  items = opts.map((o) => ({
+    __repoMenuOption: true,
+    action: o.action,
+    title: o.title,
+    subtitle: `${fullName} · ${o.blurb}`,
+    fullName,
+    htmlUrl,
+  }));
+  activeIndex = items.length ? 0 : -1;
+  setHint(
+    `Choose a view for ${fullName} · Enter to load or open · Esc back to repo list`,
+    { muted: true },
+  );
+  renderResults();
+  updateRefreshHint();
+}
+
+/** Esc from sub-list: discard preview rows and show the destination menu again. */
+function backToRepoBrowseMenu() {
+  if (repoBrowseState?.step !== 'list') return;
+  const { fullName, htmlUrl } = repoBrowseState;
+  repoBrowseState = { step: 'menu', fullName, htmlUrl };
+  buildRepoBrowseMenuItems();
+}
+
+/** Leave drill-down entirely and redraw the filtered `/repos` catalog from `reposListCache`. */
+function exitRepoBrowse() {
+  repoBrowseState = null;
+  reposBrowseAnchorKey = '';
+  void restoreReposListView();
+}
+
+/** After Esc from menu; mirrors the hint/filter logic in `runSearch`’s `/repos` branch. */
+async function restoreReposListView() {
+  const inputLine = searchInput.value.trim();
+  if (!isReposCommand(inputLine)) {
+    await runSearch();
+    return;
+  }
+  if (!reposListCache) {
+    await runSearch();
+    return;
+  }
+  const combinedFilter = buildReposLocalFilterText(inputLine);
+  const filtered = filterRepoViewRows(reposListCache, combinedFilter);
+  items = filtered;
+  activeIndex = items.length ? 0 : -1;
+  const n = reposListCache.length;
+  if (combinedFilter) {
+    setHint(
+      items.length
+        ? `${items.length} of ${n} repo${n === 1 ? '' : 's'} match`
+        : `No matches in ${n} repo${n === 1 ? '' : 's'}`,
+      { muted: true },
+    );
+  } else {
+    setHint(
+      n
+        ? `${n} repo${n === 1 ? '' : 's'} · pushed recently first · CI = GitHub Actions workflows on the default branch`
+        : 'No repositories returned for your account',
+      { muted: true },
+    );
+  }
+  renderResults();
+  updateRefreshHint();
+}
+
+/** Status line when showing Activity/CI/etc. rows inside the palette. */
+function hintForRepoBrowseSublist(total, kind, fullName) {
+  const labels = {
+    repo: 'repository',
+    releases: 'release',
+    ci: 'workflow run',
+    tags: 'tag',
+    branches: 'branch',
+    commits: 'commit',
+    activity: 'event',
+  };
+  const noun = labels[kind] ?? 'item';
+  if (total === 0) {
+    return `No ${noun}${kind === 'repo' ? '' : 's'} · ${fullName} · Esc back to menu`;
+  }
+  return `${total} ${noun}${total === 1 ? '' : 's'} · ${fullName} · Enter opens in browser · Esc back to menu`;
+}
+
+/** Shared loader for menu choices; same IPC as slash `/ci owner/repo` (`gitcp:repo-view`). */
+async function fetchRepoBrowseSublistRows(kind, fullName, forceRefresh) {
+  const data = await api().repoView({
+    kind,
+    fullName,
+    forceRefresh,
+  });
+  if (data.unavailable && data.unavailableKind === 'actions') {
+    return { unavailable: true, data };
+  }
+  const rows = (data.items ?? []).map((r) => ({
+    ...r,
+    __repoView: true,
+  }));
+  return { rows };
+}
+
+/** Enter on a menu row: `open` → browser + exit; else load `repoView` into `items` as step `list`. */
+async function handleRepoMenuSelection(row) {
+  const { action, fullName, htmlUrl } = row;
+  if (action === 'open') {
+    await api().openExternal(htmlUrl);
+    exitRepoBrowse();
+    return;
+  }
+  const kindMap = {
+    repo: 'repo',
+    ci: 'ci',
+    activity: 'activity',
+    branches: 'branches',
+    commits: 'commits',
+    releases: 'releases',
+    tags: 'tags',
+  };
+  const kind = kindMap[action];
+  if (!kind) return;
+
+  const seq = ++loadSeq;
+  setLoading(true);
+  try {
+    const result = await fetchRepoBrowseSublistRows(kind, fullName, false);
+    if (seq !== loadSeq) return;
+    if (result.unavailable) {
+      const data = result.data;
+      const req = data.requestedRepo || fullName;
+      const sug = data.suggestionRepo;
+      setHint(
+        sug
+          ? `No Actions data for ${req} (GitHub returned 403/404). Try /ci ${sug} — we picked a repo that accepts the Actions API.`
+          : `No Actions data for ${req}. GitHub blocked access and no fallback repo responded.`,
+        { muted: true },
+      );
+      renderResults();
+      return;
+    }
+    repoBrowseState = { step: 'list', fullName, kind, htmlUrl };
+    items = result.rows;
+    activeIndex = items.length ? 0 : -1;
+    setHint(hintForRepoBrowseSublist(items.length, kind, fullName), { muted: true });
+    renderResults();
+  } catch (err) {
+    setHint(err?.message || 'Could not load repository data');
+  } finally {
+    if (seq === loadSeq) setLoading(false);
+    updateRefreshHint();
+  }
+}
+
+/** Cmd/Ctrl+R while on a repo sub-list: bust cache for that `kind` + `fullName` only. */
+async function refreshRepoBrowseSublist({ forceSearchRefresh = false } = {}) {
+  if (repoBrowseState?.step !== 'list') return;
+  const { fullName, kind } = repoBrowseState;
+  const seq = ++loadSeq;
+  setLoading(true);
+  try {
+    const result = await fetchRepoBrowseSublistRows(kind, fullName, forceSearchRefresh);
+    if (seq !== loadSeq) return;
+    if (result.unavailable) {
+      const data = result.data;
+      const req = data.requestedRepo || fullName;
+      const sug = data.suggestionRepo;
+      setHint(
+        sug
+          ? `No Actions data for ${req}. Try /ci ${sug}.`
+          : `No Actions data for ${req}.`,
+        { muted: true },
+      );
+      items = [];
+      activeIndex = -1;
+      renderResults();
+      return;
+    }
+    items = result.rows;
+    activeIndex = items.length ? 0 : -1;
+    setHint(hintForRepoBrowseSublist(items.length, kind, fullName), { muted: true });
+    renderResults();
+  } catch (err) {
+    setHint(err?.message || 'Could not refresh');
+  } finally {
+    if (seq === loadSeq) setLoading(false);
+    updateRefreshHint();
+  }
+}
+
 /**
  * @param {string | undefined} rowKind
  */
 function iconForRepoViewItem(rowKind) {
   switch (rowKind) {
     case 'repo':
-      return { el: lucideIcon(BookOpen, 'result-icon--rv-repo'), label: 'Repository' };
+      return { el: resultIcon('result-icon--rv-repo', Svg.repo), label: 'Repository' };
     case 'release':
-      return { el: lucideIcon(Package, 'result-icon--rv-release'), label: 'Release' };
+      return { el: resultIcon('result-icon--rv-release', Svg.release), label: 'Release' };
     case 'ci':
-      return { el: lucideIcon(Workflow, 'result-icon--rv-ci'), label: 'Workflow run' };
+      return { el: resultIcon('result-icon--rv-ci', Svg.ci), label: 'Workflow run' };
     case 'tag':
-      return { el: lucideIcon(Tag, 'result-icon--rv-tag'), label: 'Tag' };
+      return { el: resultIcon('result-icon--rv-tag', Svg.tag), label: 'Tag' };
     case 'branch':
-      return { el: lucideIcon(GitBranch, 'result-icon--rv-branch'), label: 'Branch' };
+      return { el: resultIcon('result-icon--rv-branch', Svg.branch), label: 'Branch' };
     case 'commit':
-      return { el: lucideIcon(GitCommit, 'result-icon--rv-commit'), label: 'Commit' };
+      return { el: resultIcon('result-icon--rv-commit', Svg.commit), label: 'Commit' };
     case 'activity':
-      return { el: lucideIcon(Activity, 'result-icon--rv-activity'), label: 'Activity' };
+      return { el: resultIcon('result-icon--rv-activity', Svg.activity), label: 'Activity' };
+    case 'repos-catalog':
+      return { el: resultIcon('result-icon--rv-repo', Svg.repo), label: 'Repository' };
     default:
-      return { el: lucideIcon(BookOpen, 'result-icon--rv-repo'), label: 'Repository' };
+      return { el: resultIcon('result-icon--rv-repo', Svg.repo), label: 'Repository' };
   }
 }
 
@@ -409,6 +679,7 @@ function updateWindowHeight() {
 }
 
 function renderResults() {
+  if (!resultsEl) return;
   resultsEl.innerHTML = '';
   items.forEach((item, i) => {
     const li = document.createElement('li');
@@ -448,9 +719,37 @@ function renderResults() {
       return;
     }
 
+    // Second step: destination picker for a selected `/repos` row (`__repoMenuOption` is not `__repoView`).
+    if (item.__repoMenuOption) {
+      const iconWrap = resultIcon('result-icon--rv-repo', iconSvgForRepoMenuAction(item.action));
+      iconWrap.title = item.title;
+      const main = document.createElement('div');
+      main.className = 'result-main';
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = item.title;
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = item.subtitle;
+      main.appendChild(title);
+      main.appendChild(meta);
+      row.appendChild(iconWrap);
+      row.appendChild(main);
+      li.appendChild(row);
+      li.setAttribute('aria-label', `${item.title}: ${item.subtitle}`);
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        activeIndex = i;
+        renderResults();
+        void openSelected();
+      });
+      resultsEl.appendChild(li);
+      return;
+    }
+
     if (item.__repoView) {
-      const { el: iconWrap, label: rvLabel } = iconForRepoViewItem(item.rowKind);
-      iconWrap.title = rvLabel;
+      const { el: rvIconEl, label: rvLabel } = iconForRepoViewItem(item.rowKind);
+      rvIconEl.title = rvLabel;
 
       const main = document.createElement('div');
       main.className = 'result-main';
@@ -466,7 +765,7 @@ function renderResults() {
       main.appendChild(title);
       main.appendChild(meta);
 
-      row.appendChild(iconWrap);
+      row.appendChild(rvIconEl);
       row.appendChild(main);
       li.appendChild(row);
       li.setAttribute('aria-label', `${rvLabel}: ${item.title}`);
@@ -494,7 +793,9 @@ function renderResults() {
     const meta = document.createElement('span');
     meta.className = 'meta';
     const kind = item.pull_request ? 'PR' : 'Issue';
-    meta.textContent = `${kind} · ${item.repository.full_name} #${item.number}`;
+    const repoName = item.repository?.full_name ?? 'unknown';
+    const num = item.number != null ? String(item.number) : '–';
+    meta.textContent = `${kind} · ${repoName} #${num}`;
 
     main.appendChild(title);
     main.appendChild(meta);
@@ -529,6 +830,15 @@ async function openSelected() {
     applySelectedSlashCommand();
     return;
   }
+  // `/repos` drill-down: menu actions load data; catalog rows open the chooser (not GitHub) when at top level.
+  if (row?.__repoMenuOption) {
+    await handleRepoMenuSelection(row);
+    return;
+  }
+  if (row?.__repoView && row.rowKind === 'repos-catalog' && !repoBrowseState) {
+    enterRepoBrowseMenu(row.title, row.html_url);
+    return;
+  }
   if (!row?.html_url) return;
   await api().openExternal(row.html_url);
 }
@@ -554,6 +864,7 @@ async function runSearch(options = {}) {
   if (isRepoViewIncomplete(inputLine)) {
     issuesListCache = null;
     prsListCache = null;
+    reposListCache = null;
     items = [];
     activeIndex = -1;
     setHint('Add owner/repo after the command (e.g. octocat/Hello-World)', { muted: true });
@@ -567,6 +878,7 @@ async function runSearch(options = {}) {
   if (!q) {
     issuesListCache = null;
     prsListCache = null;
+    reposListCache = null;
     items = [];
     activeIndex = -1;
     setHint('');
@@ -579,6 +891,7 @@ async function runSearch(options = {}) {
   updateRefreshHint();
 
   if (isPrCommand(inputLine)) {
+    reposListCache = null;
     const combinedFilter = buildPrLocalFilterText(inputLine);
     setHint('');
     items = [];
@@ -592,6 +905,7 @@ async function runSearch(options = {}) {
           state: 'all',
           pullRequestsOnly: true,
         });
+        if (seq !== loadSeq) return;
         prsListCache = data.items ?? [];
       }
       const filtered = filterIssuesBySearchText(prsListCache, combinedFilter);
@@ -628,6 +942,7 @@ async function runSearch(options = {}) {
   }
 
   if (isIssuesCommand(inputLine)) {
+    reposListCache = null;
     const combinedFilter = buildIssuesLocalFilterText(inputLine);
     setHint('');
     items = [];
@@ -638,6 +953,7 @@ async function runSearch(options = {}) {
     try {
       if (!issuesListCache) {
         const data = await api().listAccessibleIssues();
+        if (seq !== loadSeq) return;
         issuesListCache = data.items ?? [];
       }
       const filtered = filterIssuesBySearchText(issuesListCache, combinedFilter);
@@ -673,10 +989,72 @@ async function runSearch(options = {}) {
     return;
   }
 
+  if (isReposCommand(inputLine)) {
+    // While drill-down is open, skip refetching the catalog unless the user changed query/pills (anchor mismatch).
+    if (repoBrowseState) {
+      if (reposBrowseEffectiveKey() === reposBrowseAnchorKey) {
+        updateRefreshHint();
+        return;
+      }
+      repoBrowseState = null;
+      reposBrowseAnchorKey = '';
+    }
+    issuesListCache = null;
+    prsListCache = null;
+    const combinedFilter = buildReposLocalFilterText(inputLine);
+    setHint('');
+    items = [];
+    activeIndex = -1;
+    renderResults();
+    const needFetch = !reposListCache;
+    setLoading(needFetch);
+    try {
+      if (!reposListCache) {
+        const data = await api().listReposWithCi();
+        if (seq !== loadSeq) return;
+        reposListCache = (data.items ?? []).map((r) => ({
+          ...r,
+          __repoView: true,
+        }));
+      }
+      const filtered = filterRepoViewRows(reposListCache, combinedFilter);
+      items = filtered;
+      activeIndex = items.length ? 0 : -1;
+      const n = reposListCache.length;
+      if (combinedFilter) {
+        setHint(
+          items.length
+            ? `${items.length} of ${n} repo${n === 1 ? '' : 's'} match`
+            : `No matches in ${n} repo${n === 1 ? '' : 's'}`,
+          { muted: true },
+        );
+      } else {
+        setHint(
+          n
+            ? `${n} repo${n === 1 ? '' : 's'} · pushed recently first · CI = GitHub Actions workflows on the default branch`
+            : 'No repositories returned for your account',
+          { muted: true },
+        );
+      }
+      renderResults();
+    } catch (err) {
+      reposListCache = null;
+      items = [];
+      activeIndex = -1;
+      renderResults();
+      setHint(err?.message || 'Could not load repositories');
+    } finally {
+      endLoading();
+      updateRefreshHint();
+    }
+    return;
+  }
+
   const repoParsed = parseRepoViewCommand(inputLine);
   if (repoParsed) {
     issuesListCache = null;
     prsListCache = null;
+    reposListCache = null;
     setHint('');
     setLoading(true);
     try {
@@ -685,6 +1063,25 @@ async function runSearch(options = {}) {
         fullName: repoParsed.fullName,
         forceRefresh: forceSearchRefresh,
       });
+      if (seq !== loadSeq) return;
+
+      if (data.unavailable && data.unavailableKind === 'actions') {
+        items = [];
+        activeIndex = -1;
+        renderResults();
+        const req = data.requestedRepo || repoParsed.fullName;
+        const sug = data.suggestionRepo;
+        setHint(
+          sug
+            ? `No Actions data for ${req} (GitHub returned 403/404 for that repo). Try /ci ${sug} — we scanned your accessible repos and common OSS picks until one accepted the Actions API.`
+            : `No Actions data for ${req}. GitHub blocked access and no fallback repo responded — check Actions settings on GitHub.`,
+          { muted: true },
+        );
+        endLoading();
+        updateRefreshHint();
+        return;
+      }
+
       const rows = (data.items ?? []).map((r) => ({
         ...r,
         __repoView: true,
@@ -733,6 +1130,7 @@ async function runSearch(options = {}) {
 
   issuesListCache = null;
   prsListCache = null;
+  reposListCache = null;
   setHint('');
   items = [];
   activeIndex = -1;
@@ -742,6 +1140,7 @@ async function runSearch(options = {}) {
     const data = await api().searchIssues(buildSearchQuery(), {
       forceRefresh: forceSearchRefresh,
     });
+    if (seq !== loadSeq) return;
     items = data.items ?? [];
     activeIndex = items.length ? 0 : -1;
     renderResults();
@@ -764,11 +1163,18 @@ function scheduleSearch() {
     t === '/issues' ||
     t.startsWith('/issues ') ||
     isPrCommand(trimmed) ||
+    isReposCommand(trimmed) ||
     shouldShowSlashCommands(trimmed) ||
     isRepoViewIncomplete(trimmed) ||
     Boolean(parseRepoViewCommand(trimmed));
   const delay = instantIssues ? 0 : 220;
-  debounceTimer = setTimeout(runSearch, delay);
+  debounceTimer = setTimeout(() => {
+    void runSearch().catch((err) => {
+      console.error('[gitcp] runSearch', err);
+      setHint(err?.message ?? 'Something went wrong');
+      setLoading(false);
+    });
+  }, delay);
 }
 
 function setFilterQualifierMenuOpen(open) {
@@ -861,7 +1267,7 @@ document.addEventListener('keydown', (e) => {
   if (appEl.classList.contains('hidden')) return;
   if (!(e.metaKey || e.ctrlKey) || (e.key !== 'r' && e.key !== 'R')) return;
   const line = searchInput.value.trim();
-  if (!parseRepoViewCommand(line) && !buildSearchQuery().trim()) return;
+  if (!parseRepoViewCommand(line) && !isReposCommand(line) && !buildSearchQuery().trim()) return;
   e.preventDefault();
   refreshSearch();
 });
@@ -899,6 +1305,12 @@ searchInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (filterQualifierMenuEl && !filterQualifierMenuEl.classList.contains('hidden')) {
       setFilterQualifierMenuOpen(false);
+    } else if (repoBrowseState?.step === 'list') {
+      // Activity/CI preview → back to destination menu.
+      backToRepoBrowseMenu();
+    } else if (repoBrowseState?.step === 'menu') {
+      // Menu → back to `/repos` list.
+      exitRepoBrowse();
     } else {
       void api().hide();
     }
@@ -918,30 +1330,37 @@ function bootstrap() {
     return;
   }
 
-  /* Show immediately: the window is transparent; #app was display:none until authStatus
-   * resolved, so the palette was completely invisible if IPC was slow or never settled. */
-  appEl.classList.remove('hidden');
+  try {
+    /* Show immediately: the window is transparent; #app was display:none until authStatus
+     * resolved, so the palette was completely invisible if IPC was slow or never settled. */
+    appEl.classList.remove('hidden');
 
-  window.gitcp.onAuthChanged((state) => updateAuthUi(state));
+    window.gitcp.onAuthChanged((state) => updateAuthUi(state));
 
-  window.gitcp.onFocusSearch(() => {
-    searchInput.focus();
-    searchInput.select();
-    updateWindowHeight();
-  });
-
-  window.gitcp
-    .authStatus()
-    .then((status) => {
-      updateAuthUi(status);
-      renderFilterPills();
-      updateRefreshHint();
-      searchInput.focus();
+    window.gitcp.onFocusSearch(() => {
+      searchInput?.focus();
+      searchInput?.select();
       updateWindowHeight();
-    })
-    .catch(() => {
-      hintEl.textContent = 'Could not load GitCP bridge.';
     });
+
+    window.gitcp
+      .authStatus()
+      .then((status) => {
+        updateAuthUi(status);
+        renderFilterPills();
+        updateRefreshHint();
+        searchInput?.focus();
+        scheduleSearch();
+        updateWindowHeight();
+      })
+      .catch(() => {
+        hintEl.textContent = 'Could not load GitCP bridge.';
+      });
+  } catch (e) {
+    console.error('[gitcp] bootstrap', e);
+    hintEl.textContent = e?.message ?? 'GitCP UI failed to start.';
+    appEl.classList.remove('hidden');
+  }
 }
 
 bootstrap();

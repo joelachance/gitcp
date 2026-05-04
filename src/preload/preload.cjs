@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('gitcp', {
       forceRefresh: Boolean(options.forceRefresh),
     }),
   listAccessibleIssues: (options) => ipcRenderer.invoke('gitcp:list-accessible-issues', options),
+  listReposWithCi: () => ipcRenderer.invoke('gitcp:list-repos-ci'),
   repoView: (payload) => ipcRenderer.invoke('gitcp:repo-view', payload ?? {}),
   openExternal: (url) => ipcRenderer.invoke('gitcp:open-external', url),
   authStatus: () => ipcRenderer.invoke('gitcp:auth-status'),

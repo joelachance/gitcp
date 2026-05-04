@@ -3,10 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.githubusercontent.com https: data:"
-    />
+    <!-- No CSP meta: file:// + ES module imports from ../../node_modules are blocked by
+         script-src 'self' (opaque file origins), which prevents renderer.js from loading at all. -->
     <title>GitCP</title>
     <link
       rel="stylesheet"
@@ -67,7 +65,7 @@
             <div class="text-box-profile">
               <button type="button" id="btn-auth" class="profile-button">
                 <img id="user-avatar" class="user-avatar hidden" alt="" width="32" height="32" />
-                <span id="user-avatar-placeholder" class="user-avatar-placeholder"></span>
+                <span id="user-avatar-placeholder" class="user-avatar-placeholder">?</span>
               </button>
             </div>
           </div>

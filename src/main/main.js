@@ -18,7 +18,13 @@ import {
   loginWithOAuth,
   logout,
 } from './github-oauth.js';
-import { fetchRepoViewItems, parseOwnerRepo } from './github-repo.js';
+import {
+  fetchRepoViewItems,
+  findAccessibleRepoWithActions,
+  isCiActionsEndpointBlocked,
+  listReposWithCi,
+  parseOwnerRepo,
+} from './github-repo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -203,8 +209,15 @@ function createWindow() {
       preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      /* sandbox:true + file:// can block loading the renderer module graph; keep preload strict. */
+      sandbox: false,
     },
+  });
+
+  mainWindow.webContents.on('console-message', (_event, level, message) => {
+    if (level >= 2) {
+      console.error('[gitcp:renderer]', message);
+    }
   });
 
   mainWindow.loadFile(getRendererPath());
@@ -396,12 +409,31 @@ async function getRepoViewData(kind, fullName, options = {}) {
   if (!forceRefresh) {
     const hit = repoViewCache.get(cacheKey);
     if (hit && Date.now() - hit.fetchedAt < REPO_VIEW_CACHE_TTL_MS) {
-      return { items: hit.items };
+      return hit.response;
     }
   }
-  const items = await fetchRepoViewItems(k, pair.owner, pair.repo, token);
-  repoViewCache.set(cacheKey, { items, fetchedAt: Date.now() });
-  return { items };
+  try {
+    const items = await fetchRepoViewItems(k, pair.owner, pair.repo, token);
+    const response = { items };
+    repoViewCache.set(cacheKey, { response, fetchedAt: Date.now() });
+    return response;
+  } catch (err) {
+    if (k === 'ci' && isCiActionsEndpointBlocked(err)) {
+      const suggestion = await findAccessibleRepoWithActions(token, {
+        excludeFullName: `${pair.owner}/${pair.repo}`,
+      });
+      const response = {
+        items: [],
+        unavailable: true,
+        unavailableKind: 'actions',
+        requestedRepo: `${pair.owner}/${pair.repo}`,
+        suggestionRepo: suggestion?.full_name ?? null,
+      };
+      repoViewCache.set(cacheKey, { response, fetchedAt: Date.now() });
+      return response;
+    }
+    throw err;
+  }
 }
 
 function setupIpc() {
@@ -414,6 +446,14 @@ function setupIpc() {
   ipcMain.handle('gitcp:list-accessible-issues', (_e, opts) =>
     listIssuesForAccessibleRepos(opts ?? {}),
   );
+
+  ipcMain.handle('gitcp:list-repos-ci', async () => {
+    const token = loadToken()?.access_token;
+    if (!token) {
+      throw new Error('Sign in with GitHub to list repositories.');
+    }
+    return listReposWithCi(token);
+  });
 
   ipcMain.handle('gitcp:repo-view', async (_e, payload) => {
     const kind = typeof payload?.kind === 'string' ? payload.kind : '';
