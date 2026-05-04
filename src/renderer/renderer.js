@@ -265,6 +265,7 @@ function renderResults() {
     row.className = 'result-row';
 
     const { el: iconWrap, label: statusLabel } = statusIconForSearchItem(item);
+    iconWrap.title = statusLabel;
 
     const main = document.createElement('div');
     main.className = 'result-main';
