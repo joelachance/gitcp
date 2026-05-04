@@ -1,8 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('gitcp', {
-  searchIssues: (query) => ipcRenderer.invoke('gitcp:search-issues', query),
+  searchIssues: (query, options = {}) =>
+    ipcRenderer.invoke('gitcp:search-issues', {
+      query: typeof query === 'string' ? query : '',
+      forceRefresh: Boolean(options.forceRefresh),
+    }),
   listAccessibleIssues: (options) => ipcRenderer.invoke('gitcp:list-accessible-issues', options),
+  repoView: (payload) => ipcRenderer.invoke('gitcp:repo-view', payload ?? {}),
   openExternal: (url) => ipcRenderer.invoke('gitcp:open-external', url),
   authStatus: () => ipcRenderer.invoke('gitcp:auth-status'),
   login: () => ipcRenderer.invoke('gitcp:login'),

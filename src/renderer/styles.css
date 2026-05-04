@@ -60,12 +60,12 @@ body {
 /*
  * .text-box — bordered region (same look as the old #query border): typing area is only
  * the top part; profile sits bottom-right inside this same box.
- * Sides/bottom: 9px from the shell. Top margin is 2px so 7px drag strip + 2px = 9px total above
- * the field (matches horizontal 9px). Bottom uses 9px margin only — no extra main padding when empty.
+ * Sides/bottom: 12px from the shell. Top margin is 5px so 7px drag strip + 5px = 12px total above
+ * the field (matches horizontal 12px). Bottom uses 12px margin only — no extra main padding when empty.
  */
 .text-box {
   flex-shrink: 0;
-  margin: 2px 9px 9px 9px;
+  margin: 5px 12px 12px 12px;
   display: flex;
   flex-direction: column;
   border-radius: 10px;
@@ -88,7 +88,7 @@ body {
 
 .text-box-input-row {
   flex-shrink: 0;
-  padding: 7px 9px 3px;
+  padding: 7px 6px 3px;
 }
 
 #query {
@@ -114,7 +114,8 @@ body {
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
-  padding: 2px 7px 7px;
+  /* Same inset from text-box border on left and bottom; ties spinner/+ to badge row */
+  padding: 2px 6px 6px;
   gap: 8px;
 }
 
@@ -126,14 +127,15 @@ body {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 6px;
-  min-height: 14px;
 }
 
-/* Fixed width so the + never shifts when the spinner appears */
+/* Fixed width so the + never shifts when the spinner appears; min-height matches .badge.filter-pill row */
 .load-spinner-slot {
   flex-shrink: 0;
-  width: 12px;
-  height: 14px;
+  box-sizing: border-box;
+  width: 14px;
+  min-height: 19px;
+  padding-left: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -226,6 +228,7 @@ body {
   align-items: center;
   justify-content: center;
   min-width: 1em;
+  min-height: 19px;
   padding: 0;
   margin: 0;
   border: none;
@@ -329,14 +332,14 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 0 9px 0;
+  padding: 0 12px 0;
 }
 
 /* Bottom padding when the list, hint (e.g. no matches), or refresh hint is shown */
 .input-box-main:has(.results:not(:empty)),
 .input-box-main:has(.hint:not(:empty)),
 .input-box-main:has(.results-refresh-hint:not(.hidden)) {
-  padding-bottom: 9px;
+  padding-bottom: 12px;
 }
 
 .hint {

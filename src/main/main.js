@@ -9,6 +9,7 @@ import {
   shell,
   Tray,
 } from 'electron';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -17,6 +18,7 @@ import {
   loginWithOAuth,
   logout,
 } from './github-oauth.js';
+import { fetchRepoViewItems, parseOwnerRepo } from './github-repo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +57,34 @@ let registeredShortcuts = [];
 let activeShortcut = null;
 
 let appIsQuitting = false;
+
+const SEARCH_CACHE_TTL_MS = 60 * 60 * 1000;
+const REPO_VIEW_CACHE_TTL_MS = 5 * 60 * 1000;
+/** @type {Map<string, { items: unknown[]; fetchedAt: number }>} */
+const searchIssuesCache = new Map();
+/** @type {Map<string, { items: unknown[]; fetchedAt: number }>} */
+const repoViewCache = new Map();
+
+function clearSearchIssuesCache() {
+  searchIssuesCache.clear();
+}
+
+function clearRepoViewCache() {
+  repoViewCache.clear();
+}
+
+function pruneSearchIssuesCache() {
+  const now = Date.now();
+  for (const [k, v] of searchIssuesCache) {
+    if (now - v.fetchedAt >= SEARCH_CACHE_TTL_MS) {
+      searchIssuesCache.delete(k);
+    }
+  }
+}
+
+function searchIssuesCacheKey(accessToken, fullQ) {
+  return crypto.createHash('sha256').update(`${accessToken}\0${fullQ}`, 'utf8').digest('hex');
+}
 
 /** True when createWindow() was triggered by showPalette() — show after ready-to-show. */
 let pendingPaletteReveal = false;
@@ -178,12 +208,15 @@ function createWindow() {
   });
 
   mainWindow.loadFile(getRendererPath());
-  mainWindow.once('ready-to-show', () => {
-    if (pendingPaletteReveal) {
-      pendingPaletteReveal = false;
-      revealPalette();
-    }
-  });
+  /* ready-to-show can fail to fire for frameless+transparent on some macOS/Electron pairs; use
+   * did-finish-load as a fallback so the window is not left with show: false forever. */
+  const flushPendingPaletteReveal = () => {
+    if (!pendingPaletteReveal || !mainWindow) return;
+    pendingPaletteReveal = false;
+    revealPalette();
+  };
+  mainWindow.once('ready-to-show', flushPendingPaletteReveal);
+  mainWindow.webContents.once('did-finish-load', flushPendingPaletteReveal);
 
   mainWindow.on('close', (e) => {
     if (!appIsQuitting) {
@@ -197,16 +230,27 @@ app.on('before-quit', () => {
   appIsQuitting = true;
 });
 
+let pendingSecondInstanceFocus = false;
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  /**
+   * second-instance can arrive before `ready` on the primary. Creating a BrowserWindow
+   * before `ready` breaks startup; showing before `setupIpc()` leaves the renderer without
+   * IPC (and globalShortcut is registered in `whenReady`).
+   */
   app.on('second-instance', () => {
-    showPalette();
+    if (app.isReady()) {
+      showPalette();
+    } else {
+      pendingSecondInstanceFocus = true;
+    }
   });
 }
 
-async function searchIssuesAndPrs(query) {
+async function searchIssuesAndPrs(query, { forceRefresh = false } = {}) {
   const q = (query || '').trim();
   if (!q) {
     return { items: [] };
@@ -219,6 +263,16 @@ async function searchIssuesAndPrs(query) {
   const fullQ = /\bis:(issue|pr)\b|\btype:(issue|pr)\b/i.test(q)
     ? q
     : `${q} (is:issue OR is:pr)`;
+
+  pruneSearchIssuesCache();
+
+  const key = searchIssuesCacheKey(token, fullQ);
+  if (!forceRefresh) {
+    const hit = searchIssuesCache.get(key);
+    if (hit && Date.now() - hit.fetchedAt < SEARCH_CACHE_TTL_MS) {
+      return { items: hit.items };
+    }
+  }
 
   const url = new URL('https://api.github.com/search/issues');
   url.searchParams.set('q', fullQ);
@@ -237,7 +291,9 @@ async function searchIssuesAndPrs(query) {
     const msg = data.message || res.statusText || 'Search request failed';
     throw new Error(msg);
   }
-  return { items: data.items || [] };
+  const items = data.items || [];
+  searchIssuesCache.set(key, { items, fetchedAt: Date.now() });
+  return { items };
 }
 
 function normalizeIssueListItem(item) {
@@ -307,11 +363,64 @@ async function listIssuesForAccessibleRepos(options = {}) {
   return { items: all };
 }
 
+/**
+ * @param {string} kind
+ * @param {string} fullName
+ * @param {{ forceRefresh?: boolean }} [options]
+ */
+const REPO_VIEW_KINDS = new Set([
+  'repo',
+  'releases',
+  'ci',
+  'tags',
+  'branches',
+  'commits',
+  'activity',
+]);
+
+async function getRepoViewData(kind, fullName, options = {}) {
+  const { forceRefresh = false } = options;
+  const k = typeof kind === 'string' ? kind.toLowerCase() : '';
+  if (!REPO_VIEW_KINDS.has(k)) {
+    throw new Error('Unknown repository command.');
+  }
+  const token = loadToken()?.access_token;
+  if (!token) {
+    throw new Error('Sign in with GitHub to browse repository data.');
+  }
+  const pair = parseOwnerRepo(fullName);
+  if (!pair) {
+    throw new Error('Use owner/repo (e.g. octocat/Hello-World).');
+  }
+  const cacheKey = `${k}/${pair.owner.toLowerCase()}/${pair.repo.toLowerCase()}`;
+  if (!forceRefresh) {
+    const hit = repoViewCache.get(cacheKey);
+    if (hit && Date.now() - hit.fetchedAt < REPO_VIEW_CACHE_TTL_MS) {
+      return { items: hit.items };
+    }
+  }
+  const items = await fetchRepoViewItems(k, pair.owner, pair.repo, token);
+  repoViewCache.set(cacheKey, { items, fetchedAt: Date.now() });
+  return { items };
+}
+
 function setupIpc() {
-  ipcMain.handle('gitcp:search-issues', async (_e, query) => searchIssuesAndPrs(query));
+  ipcMain.handle('gitcp:search-issues', async (_e, payload) => {
+    const query = typeof payload === 'string' ? payload : payload?.query ?? '';
+    const forceRefresh =
+      typeof payload === 'object' && payload !== null && payload.forceRefresh === true;
+    return searchIssuesAndPrs(query, { forceRefresh });
+  });
   ipcMain.handle('gitcp:list-accessible-issues', (_e, opts) =>
     listIssuesForAccessibleRepos(opts ?? {}),
   );
+
+  ipcMain.handle('gitcp:repo-view', async (_e, payload) => {
+    const kind = typeof payload?.kind === 'string' ? payload.kind : '';
+    const fullName = typeof payload?.fullName === 'string' ? payload.fullName.trim() : '';
+    const forceRefresh = typeof payload === 'object' && payload !== null && payload.forceRefresh === true;
+    return getRepoViewData(kind, fullName, { forceRefresh });
+  });
 
   ipcMain.handle('gitcp:open-external', async (_e, url) => {
     if (typeof url !== 'string' || !url.startsWith('https://')) {
@@ -330,6 +439,8 @@ function setupIpc() {
 
   ipcMain.handle('gitcp:logout', () => {
     logout();
+    clearSearchIssuesCache();
+    clearRepoViewCache();
     broadcastAuth();
     return getAuthState();
   });
@@ -358,6 +469,11 @@ app.whenReady().then(() => {
   setupIpc();
   registerGlobalShortcuts();
   createTray();
+
+  if (pendingSecondInstanceFocus) {
+    pendingSecondInstanceFocus = false;
+    showPalette();
+  }
 
   app.on('activate', () => {
     if (mainWindow) {

@@ -1,10 +1,17 @@
 import createLucideSvg from '../../node_modules/lucide/dist/esm/createElement.mjs';
+import Activity from '../../node_modules/lucide/dist/esm/icons/activity.mjs';
+import BookOpen from '../../node_modules/lucide/dist/esm/icons/book-open.mjs';
 import CircleCheck from '../../node_modules/lucide/dist/esm/icons/circle-check.mjs';
 import CircleDot from '../../node_modules/lucide/dist/esm/icons/circle-dot.mjs';
+import GitBranch from '../../node_modules/lucide/dist/esm/icons/git-branch.mjs';
+import GitCommit from '../../node_modules/lucide/dist/esm/icons/git-commit.mjs';
 import GitMerge from '../../node_modules/lucide/dist/esm/icons/git-merge.mjs';
 import GitPullRequest from '../../node_modules/lucide/dist/esm/icons/git-pull-request.mjs';
 import GitPullRequestClosed from '../../node_modules/lucide/dist/esm/icons/git-pull-request-closed.mjs';
 import GitPullRequestDraft from '../../node_modules/lucide/dist/esm/icons/git-pull-request-draft.mjs';
+import Package from '../../node_modules/lucide/dist/esm/icons/package.mjs';
+import Tag from '../../node_modules/lucide/dist/esm/icons/tag.mjs';
+import Workflow from '../../node_modules/lucide/dist/esm/icons/workflow.mjs';
 
 const searchInput = document.getElementById('query');
 const resultsEl = document.getElementById('results');
@@ -54,6 +61,25 @@ function refreshShortcutLabel() {
 
 function updateRefreshHint() {
   if (!resultsRefreshHintEl) return;
+  const trimmed = searchInput.value.trim();
+  if (shouldShowSlashCommands(trimmed)) {
+    resultsRefreshHintEl.textContent = '';
+    resultsRefreshHintEl.classList.add('hidden');
+    updateWindowHeight();
+    return;
+  }
+  if (isRepoViewIncomplete(trimmed)) {
+    resultsRefreshHintEl.textContent = '';
+    resultsRefreshHintEl.classList.add('hidden');
+    updateWindowHeight();
+    return;
+  }
+  if (parseRepoViewCommand(trimmed)) {
+    resultsRefreshHintEl.textContent = `${refreshShortcutLabel()} to refresh`;
+    resultsRefreshHintEl.classList.remove('hidden');
+    updateWindowHeight();
+    return;
+  }
   const q = buildSearchQuery();
   if (!q) {
     resultsRefreshHintEl.textContent = '';
@@ -73,7 +99,7 @@ function refreshSearch() {
   } else if (isPrCommand(inputLine)) {
     prsListCache = null;
   }
-  void runSearch();
+  void runSearch({ forceSearchRefresh: true });
 }
 
 function setLoading(on) {
@@ -205,11 +231,55 @@ function tryCommitSearchFilter() {
   return true;
 }
 
+/** Shown when input starts with `/` but is not yet a complete command. */
+const SLASH_COMMANDS = [
+  {
+    command: '/issues',
+    description: 'Open issues in repos you can access',
+  },
+  {
+    command: '/pr',
+    description: 'Pull requests (open & closed) in repos you can access',
+  },
+  {
+    command: '/prs',
+    description: 'Same as /pr',
+  },
+  {
+    command: '/activity',
+    description: 'Repository events (needs owner/repo)',
+  },
+  {
+    command: '/branches',
+    description: 'Branches (needs owner/repo)',
+  },
+  {
+    command: '/commits',
+    description: 'Recent commits (needs owner/repo)',
+  },
+  {
+    command: '/releases',
+    description: 'Releases (needs owner/repo)',
+  },
+  {
+    command: '/repo',
+    description: 'Repository summary (needs owner/repo)',
+  },
+  {
+    command: '/tags',
+    description: 'Tags (needs owner/repo)',
+  },
+  {
+    command: '/ci',
+    description: 'Actions workflow runs (needs owner/repo)',
+  },
+];
+
 function isIssuesCommand(trimmed) {
-  return trimmed === '/issues' || trimmed.startsWith('/issues ');
+  const lower = trimmed.toLowerCase();
+  return lower === '/issues' || lower.startsWith('/issues ');
 }
 
-/** `/pr` and `/prs` (any case); `/prs` checked before `/pr` for filter text. */
 function isPrCommand(trimmed) {
   const lower = trimmed.toLowerCase();
   if (lower === '/prs' || lower.startsWith('/prs ')) return true;
@@ -226,6 +296,54 @@ function prCommandFilterText(trimmed) {
   return '';
 }
 
+/**
+ * @param {string} trimmed
+ * @returns {{ kind: string, fullName: string, filterText: string } | null}
+ */
+function parseRepoViewCommand(trimmed) {
+  const m = trimmed.match(
+    /^\/(repo|releases|ci|tags|branches|commits|activity)\s+(\S+\/\S+)(?:\s+(.*))?$/i,
+  );
+  if (!m) return null;
+  return {
+    kind: m[1].toLowerCase(),
+    fullName: m[2],
+    filterText: (m[3] || '').trim(),
+  };
+}
+
+/**
+ * True when the user is typing `/releases` etc. but has not yet entered owner/repo.
+ * @param {string} trimmed
+ */
+function isRepoViewIncomplete(trimmed) {
+  const m = trimmed.match(/^\/(repo|releases|ci|tags|branches|commits|activity)(?:\s+(.*))?$/i);
+  if (!m) return false;
+  const rest = (m[2] || '').trim();
+  if (!rest) return true;
+  const firstTok = rest.split(/\s+/)[0];
+  if (!firstTok.includes('/')) return true;
+  return false;
+}
+
+function shouldShowSlashCommands(trimmed) {
+  if (!trimmed.startsWith('/')) return false;
+  if (isIssuesCommand(trimmed)) return false;
+  if (isPrCommand(trimmed)) return false;
+  if (parseRepoViewCommand(trimmed)) return false;
+  if (isRepoViewIncomplete(trimmed)) return false;
+  return true;
+}
+
+function buildSlashPickerItems(trimmed) {
+  const prefix = trimmed.toLowerCase();
+  return SLASH_COMMANDS.filter((c) => c.command.startsWith(prefix)).map((c) => ({
+    __slashCommand: true,
+    command: c.command,
+    description: c.description,
+  }));
+}
+
 function filterIssuesBySearchText(list, searchText) {
   const terms = searchText
     .trim()
@@ -237,6 +355,43 @@ function filterIssuesBySearchText(list, searchText) {
     const hay = `${item.title} ${item.repository?.full_name ?? ''}`.toLowerCase();
     return terms.every((t) => hay.includes(t));
   });
+}
+
+/**
+ * @param {{ title: string, subtitle: string }[]} list
+ * @param {string} searchText
+ */
+function filterRepoViewRows(list, searchText) {
+  const terms = searchText.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return list;
+  return list.filter((item) => {
+    const hay = `${item.title} ${item.subtitle}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+}
+
+/**
+ * @param {string | undefined} rowKind
+ */
+function iconForRepoViewItem(rowKind) {
+  switch (rowKind) {
+    case 'repo':
+      return { el: lucideIcon(BookOpen, 'result-icon--rv-repo'), label: 'Repository' };
+    case 'release':
+      return { el: lucideIcon(Package, 'result-icon--rv-release'), label: 'Release' };
+    case 'ci':
+      return { el: lucideIcon(Workflow, 'result-icon--rv-ci'), label: 'Workflow run' };
+    case 'tag':
+      return { el: lucideIcon(Tag, 'result-icon--rv-tag'), label: 'Tag' };
+    case 'branch':
+      return { el: lucideIcon(GitBranch, 'result-icon--rv-branch'), label: 'Branch' };
+    case 'commit':
+      return { el: lucideIcon(GitCommit, 'result-icon--rv-commit'), label: 'Commit' };
+    case 'activity':
+      return { el: lucideIcon(Activity, 'result-icon--rv-activity'), label: 'Activity' };
+    default:
+      return { el: lucideIcon(BookOpen, 'result-icon--rv-repo'), label: 'Repository' };
+  }
 }
 
 function updateWindowHeight() {
@@ -263,6 +418,68 @@ function renderResults() {
 
     const row = document.createElement('div');
     row.className = 'result-row';
+
+    if (item.__slashCommand) {
+      const main = document.createElement('div');
+      main.className = 'result-main';
+
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = item.command;
+
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = item.description;
+
+      main.appendChild(title);
+      main.appendChild(meta);
+
+      row.appendChild(main);
+      li.appendChild(row);
+      li.setAttribute('aria-label', `${item.command}: ${item.description}`);
+
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        activeIndex = i;
+        renderResults();
+        applySelectedSlashCommand();
+      });
+      resultsEl.appendChild(li);
+      return;
+    }
+
+    if (item.__repoView) {
+      const { el: iconWrap, label: rvLabel } = iconForRepoViewItem(item.rowKind);
+      iconWrap.title = rvLabel;
+
+      const main = document.createElement('div');
+      main.className = 'result-main';
+
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = item.title;
+
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = item.subtitle;
+
+      main.appendChild(title);
+      main.appendChild(meta);
+
+      row.appendChild(iconWrap);
+      row.appendChild(main);
+      li.appendChild(row);
+      li.setAttribute('aria-label', `${rvLabel}: ${item.title}`);
+
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        activeIndex = i;
+        renderResults();
+        openSelected();
+      });
+      resultsEl.appendChild(li);
+      return;
+    }
 
     const { el: iconWrap, label: statusLabel } = statusIconForSearchItem(item);
     iconWrap.title = statusLabel;
@@ -298,19 +515,54 @@ function renderResults() {
   updateWindowHeight();
 }
 
+function applySelectedSlashCommand() {
+  const row = items[activeIndex];
+  if (!row?.__slashCommand || !row.command) return;
+  searchInput.value = `${row.command} `;
+  searchInput.focus();
+  scheduleSearch();
+}
+
 async function openSelected() {
   const row = items[activeIndex];
+  if (row?.__slashCommand) {
+    applySelectedSlashCommand();
+    return;
+  }
   if (!row?.html_url) return;
   await api().openExternal(row.html_url);
 }
 
-async function runSearch() {
+async function runSearch(options = {}) {
+  const { forceSearchRefresh = false } = options;
   const seq = ++loadSeq;
   const endLoading = () => {
     if (seq === loadSeq) setLoading(false);
   };
 
   const inputLine = searchInput.value.trim();
+  if (shouldShowSlashCommands(inputLine)) {
+    items = buildSlashPickerItems(inputLine);
+    activeIndex = items.length ? 0 : -1;
+    setHint(items.length ? '' : 'No matching commands', { muted: !items.length });
+    setLoading(false);
+    renderResults();
+    updateRefreshHint();
+    return;
+  }
+
+  if (isRepoViewIncomplete(inputLine)) {
+    issuesListCache = null;
+    prsListCache = null;
+    items = [];
+    activeIndex = -1;
+    setHint('Add owner/repo after the command (e.g. octocat/Hello-World)', { muted: true });
+    setLoading(false);
+    renderResults();
+    updateRefreshHint();
+    return;
+  }
+
   const q = buildSearchQuery();
   if (!q) {
     issuesListCache = null;
@@ -329,6 +581,9 @@ async function runSearch() {
   if (isPrCommand(inputLine)) {
     const combinedFilter = buildPrLocalFilterText(inputLine);
     setHint('');
+    items = [];
+    activeIndex = -1;
+    renderResults();
     const needFetch = !prsListCache;
     setLoading(needFetch);
     try {
@@ -375,6 +630,9 @@ async function runSearch() {
   if (isIssuesCommand(inputLine)) {
     const combinedFilter = buildIssuesLocalFilterText(inputLine);
     setHint('');
+    items = [];
+    activeIndex = -1;
+    renderResults();
     const needFetch = !issuesListCache;
     setLoading(needFetch);
     try {
@@ -415,12 +673,75 @@ async function runSearch() {
     return;
   }
 
+  const repoParsed = parseRepoViewCommand(inputLine);
+  if (repoParsed) {
+    issuesListCache = null;
+    prsListCache = null;
+    setHint('');
+    setLoading(true);
+    try {
+      const data = await api().repoView({
+        kind: repoParsed.kind,
+        fullName: repoParsed.fullName,
+        forceRefresh: forceSearchRefresh,
+      });
+      const rows = (data.items ?? []).map((r) => ({
+        ...r,
+        __repoView: true,
+      }));
+      const filtered = filterRepoViewRows(rows, repoParsed.filterText);
+      items = filtered;
+      activeIndex = items.length ? 0 : -1;
+      const total = rows.length;
+      const labels = {
+        repo: 'repository',
+        releases: 'release',
+        ci: 'workflow run',
+        tags: 'tag',
+        branches: 'branch',
+        commits: 'commit',
+        activity: 'event',
+      };
+      const noun = labels[repoParsed.kind] ?? 'item';
+      if (repoParsed.filterText) {
+        setHint(
+          items.length
+            ? `${items.length} of ${total} ${noun}${total === 1 ? '' : 's'} match`
+            : `No matches in ${total} ${noun}${total === 1 ? '' : 's'}`,
+          { muted: true },
+        );
+      } else {
+        setHint(
+          total
+            ? `${total} ${noun}${total === 1 ? '' : 's'} · ${repoParsed.fullName}`
+            : `No ${noun}s · ${repoParsed.fullName}`,
+          { muted: true },
+        );
+      }
+      renderResults();
+    } catch (err) {
+      items = [];
+      activeIndex = -1;
+      renderResults();
+      setHint(err?.message || 'Could not load repository data');
+    } finally {
+      endLoading();
+      updateRefreshHint();
+    }
+    return;
+  }
+
   issuesListCache = null;
   prsListCache = null;
   setHint('');
+  items = [];
+  activeIndex = -1;
+  renderResults();
   setLoading(true);
   try {
-    const data = await api().searchIssues(buildSearchQuery());
+    const data = await api().searchIssues(buildSearchQuery(), {
+      forceRefresh: forceSearchRefresh,
+    });
     items = data.items ?? [];
     activeIndex = items.length ? 0 : -1;
     renderResults();
@@ -438,10 +759,14 @@ async function runSearch() {
 function scheduleSearch() {
   clearTimeout(debounceTimer);
   const t = searchInput.value.trimStart();
+  const trimmed = searchInput.value.trim();
   const instantIssues =
     t === '/issues' ||
     t.startsWith('/issues ') ||
-    isPrCommand(t);
+    isPrCommand(trimmed) ||
+    shouldShowSlashCommands(trimmed) ||
+    isRepoViewIncomplete(trimmed) ||
+    Boolean(parseRepoViewCommand(trimmed));
   const delay = instantIssues ? 0 : 220;
   debounceTimer = setTimeout(runSearch, delay);
 }
@@ -535,7 +860,8 @@ searchInput.addEventListener('input', scheduleSearch);
 document.addEventListener('keydown', (e) => {
   if (appEl.classList.contains('hidden')) return;
   if (!(e.metaKey || e.ctrlKey) || (e.key !== 'r' && e.key !== 'R')) return;
-  if (!buildSearchQuery().trim()) return;
+  const line = searchInput.value.trim();
+  if (!parseRepoViewCommand(line) && !buildSearchQuery().trim()) return;
   e.preventDefault();
   refreshSearch();
 });
@@ -551,6 +877,18 @@ searchInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (items.length === 0) return;
     activeIndex = Math.max(activeIndex - 1, 0);
+    renderResults();
+    scrollActiveIntoView();
+  } else if (
+    items.length > 0 &&
+    (e.key === 'j' || e.key === 'J' || e.key === 'k' || e.key === 'K')
+  ) {
+    e.preventDefault();
+    if (e.key === 'j' || e.key === 'J') {
+      activeIndex = Math.min(activeIndex + 1, items.length - 1);
+    } else {
+      activeIndex = Math.max(activeIndex - 1, 0);
+    }
     renderResults();
     scrollActiveIntoView();
   } else if (e.key === 'Enter') {
@@ -580,6 +918,10 @@ function bootstrap() {
     return;
   }
 
+  /* Show immediately: the window is transparent; #app was display:none until authStatus
+   * resolved, so the palette was completely invisible if IPC was slow or never settled. */
+  appEl.classList.remove('hidden');
+
   window.gitcp.onAuthChanged((state) => updateAuthUi(state));
 
   window.gitcp.onFocusSearch(() => {
@@ -592,14 +934,12 @@ function bootstrap() {
     .authStatus()
     .then((status) => {
       updateAuthUi(status);
-      appEl.classList.remove('hidden');
       renderFilterPills();
       updateRefreshHint();
       searchInput.focus();
       updateWindowHeight();
     })
     .catch(() => {
-      appEl.classList.remove('hidden');
       hintEl.textContent = 'Could not load GitCP bridge.';
     });
 }
