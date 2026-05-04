@@ -1,0 +1,17 @@
+{
+  "name": "gitcp",
+  "version": "0.1.0",
+  "description": "Git Command Palette — search GitHub issues & PRs, open in browser",
+  "type": "module",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "bun x electron .",
+    "dev": "bun x electron ."
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "^34.0.0"
+  }
+}
