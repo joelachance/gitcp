@@ -27,14 +27,27 @@ body {
   display: none !important;
 }
 
-/* Frameless window: rounded shell like ChatGPT composer */
+/* 10px inset from the window edge */
 #app {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
   padding: 10px;
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* Outer shell: drag strip + results area (no duplicate inner chrome on the field) */
+.input-box {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  overflow: hidden;
 }
 
 .drag-strip {
@@ -45,33 +58,41 @@ body {
   app-region: drag;
 }
 
-.shell {
+/*
+ * .text-box — bordered region (same look as the old #query border): typing area is only
+ * the top part; profile sits bottom-right inside this same box.
+ * Equal inset from the shell on all sides (margin), including below when results are empty.
+ */
+.text-box {
+  flex-shrink: 0;
+  margin: 12px;
   display: flex;
   flex-direction: column;
-  gap: 0;
-  flex: 1;
-  min-height: 0;
-  padding: 14px 16px 12px;
-  border-radius: 16px;
+  border-radius: 10px;
   border: 1px solid #30363d;
-  background: #161b22;
+  background: #0d1117;
   -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
-.composer {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
+.text-box:focus-within {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.22);
+}
+
+.text-box-input-row {
+  flex-shrink: 0;
+  padding: 10px 12px 6px;
 }
 
 #query {
-  flex: 1;
-  min-width: 0;
-  padding: 12px 16px;
-  border-radius: 22px;
-  border: 1px solid #30363d;
-  background: #0d1117;
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  padding: 2px 2px 4px;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: #e6edf3;
   font-size: 14px;
   line-height: 1.35;
@@ -80,34 +101,29 @@ body {
   user-select: text;
 }
 
-#query:focus {
-  border-color: #58a6ff;
-  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.22);
-}
-
-.btn-auth {
+.text-box-profile {
   flex-shrink: 0;
-  align-self: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid #30363d;
-  background: #21262d;
-  color: #e6edf3;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 4px 10px 10px;
 }
 
-.btn-auth:hover {
-  background: #30363d;
+/* Hint + results below the text-box; horizontal inset matches .text-box margin */
+.input-box-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 12px 12px;
 }
 
 .hint {
-  margin-top: 8px;
-  padding: 0 4px;
+  flex-shrink: 0;
+  padding: 8px 0 0;
   font-size: 11px;
   color: #f85149;
-  min-height: 0;
 }
 
 .hint:empty {
@@ -116,19 +132,25 @@ body {
 
 .results {
   list-style: none;
-  margin: 10px 0 0;
-  padding: 4px 0 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 8px 4px;
   max-height: 280px;
   overflow-y: auto;
   overflow-x: hidden;
-  border-top: 1px solid #21262d;
 }
 
 .results:empty {
   display: none;
   margin: 0;
   padding: 0;
-  border-top: none;
+}
+
+.results:not(:empty) {
+  border-top: 1px solid #21262d;
+  margin-top: 6px;
+  padding-top: 6px;
 }
 
 .results li {
@@ -157,13 +179,44 @@ body {
   color: #8b949e;
 }
 
-.shortcut-note {
-  margin: 8px 4px 0;
+.profile-button {
+  width: 32px;
+  height: 32px;
   padding: 0;
-  font-size: 11px;
-  color: #6e7681;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  background: #21262d;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
 }
 
-.shortcut-note:empty {
+.profile-button:hover {
+  background: #30363d;
+}
+
+.profile-button .user-avatar {
+  display: block;
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 999px;
+}
+
+.profile-button .user-avatar.hidden {
+  display: none;
+}
+
+.user-avatar-placeholder {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+  line-height: 1;
+}
+
+.profile-button .user-avatar:not(.hidden) ~ .user-avatar-placeholder {
   display: none;
 }

@@ -90,6 +90,7 @@ async function exchangeCode({ code, verifier, clientId, clientSecret, redirectUr
     token_type: tokenData.token_type || 'bearer',
     scope: tokenData.scope || '',
     login: user.login || null,
+    avatar_url: user.avatar_url ?? null,
   };
   saveToken(row);
   return row;
@@ -203,9 +204,13 @@ export async function loginWithOAuth() {
 export function getAuthState() {
   const t = loadToken();
   if (!t?.access_token) {
-    return { loggedIn: false, login: null };
+    return { loggedIn: false, login: null, avatarUrl: null };
   }
-  return { loggedIn: true, login: t.login ?? null };
+  return {
+    loggedIn: true,
+    login: t.login ?? null,
+    avatarUrl: t.avatar_url ?? null,
+  };
 }
 
 export function logout() {

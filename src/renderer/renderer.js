@@ -2,7 +2,8 @@ const searchInput = document.getElementById('query');
 const resultsEl = document.getElementById('results');
 const hintEl = document.getElementById('hint');
 const btnAuth = document.getElementById('btn-auth');
-const shortcutNote = document.getElementById('shortcut-note');
+const userAvatarEl = document.getElementById('user-avatar');
+const userAvatarPlaceholderEl = document.getElementById('user-avatar-placeholder');
 const appEl = document.getElementById('app');
 
 let items = [];
@@ -97,11 +98,27 @@ function scheduleSearch() {
 
 function updateAuthUi(status) {
   if (status?.loggedIn) {
-    btnAuth.textContent = status.login ? `Sign out (${status.login})` : 'Sign out';
-    btnAuth.title = 'Sign out of GitHub';
+    btnAuth.title = status.login ? `Sign out (${status.login})` : 'Sign out';
+    btnAuth.setAttribute('aria-label', btnAuth.title);
+    if (status.avatarUrl) {
+      userAvatarEl.src = status.avatarUrl;
+      userAvatarEl.alt = status.login ? `${status.login} on GitHub` : 'GitHub profile';
+      userAvatarEl.classList.remove('hidden');
+    } else {
+      userAvatarEl.removeAttribute('src');
+      userAvatarEl.classList.add('hidden');
+      userAvatarEl.alt = '';
+    }
+    userAvatarPlaceholderEl.textContent = status.avatarUrl
+      ? ''
+      : (status.login || '?').slice(0, 1).toUpperCase();
   } else {
-    btnAuth.textContent = 'Sign in';
+    userAvatarEl.removeAttribute('src');
+    userAvatarEl.classList.add('hidden');
+    userAvatarEl.alt = '';
+    userAvatarPlaceholderEl.textContent = '?';
     btnAuth.title = 'Sign in with GitHub';
+    btnAuth.setAttribute('aria-label', 'Sign in with GitHub');
   }
 }
 
@@ -164,15 +181,10 @@ function bootstrap() {
     updateWindowHeight();
   });
 
-  Promise.all([window.gitcp.authStatus(), window.gitcp.shortcutInfo()])
-    .then(([status, sc]) => {
+  window.gitcp
+    .authStatus()
+    .then((status) => {
       updateAuthUi(status);
-      if (sc?.registered?.length) {
-        shortcutNote.textContent = `Shortcuts: ${sc.registered.join(', ')}`;
-      } else {
-        shortcutNote.textContent =
-          'No global shortcut registered — use the GitCP icon in the menu bar (macOS) or tray (Windows/Linux) to open.';
-      }
       appEl.classList.remove('hidden');
       searchInput.focus();
       updateWindowHeight();

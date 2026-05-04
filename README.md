@@ -54,7 +54,7 @@ On Linux, if you see a sandbox error when running as root, you can start the bin
 
 ## Opening GitCP (shortcut + tray)
 
-GitCP registers **several** global shortcuts when possible (you’ll see which ones worked in the footer):
+GitCP registers **several** global shortcuts when possible; the first one that successfully registers is used.
 
 | Priority (macOS) | Typical binding |
 |------------------|------------------|

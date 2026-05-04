@@ -56,6 +56,9 @@ let activeShortcut = null;
 
 let appIsQuitting = false;
 
+/** True when createWindow() was triggered by showPalette() — show after ready-to-show. */
+let pendingPaletteReveal = false;
+
 function broadcastAuth() {
   const state = getAuthState();
   for (const w of BrowserWindow.getAllWindows()) {
@@ -63,15 +66,26 @@ function broadcastAuth() {
   }
 }
 
-function showPalette() {
-  if (!mainWindow) {
-    createWindow();
+function revealPalette() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  /* Hotkey / tray can fire repeatedly; if we're already frontmost, skip to avoid
+   * redundant focus → resize churn (and growing height from measurement feedback). */
+  if (mainWindow.isVisible() && mainWindow.isFocused()) {
     return;
   }
-  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
   mainWindow.webContents.send('gitcp:focus-search');
+}
+
+function showPalette() {
+  if (!mainWindow) {
+    pendingPaletteReveal = true;
+    createWindow();
+    return;
+  }
+  revealPalette();
 }
 
 function hidePalette() {
@@ -165,7 +179,10 @@ function createWindow() {
 
   mainWindow.loadFile(getRendererPath());
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+    if (pendingPaletteReveal) {
+      pendingPaletteReveal = false;
+      revealPalette();
+    }
   });
 
   mainWindow.on('close', (e) => {
@@ -269,14 +286,11 @@ function setupIpc() {
 
 app.whenReady().then(() => {
   setupIpc();
-  createWindow();
   registerGlobalShortcuts();
   createTray();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    } else {
+    if (mainWindow) {
       showPalette();
     }
   });
