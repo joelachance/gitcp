@@ -637,19 +637,19 @@ const SLASH_COMMANDS = [
   },
   {
     command: '/activity',
-    description: 'Repository events — use /activity owner/repo',
+    description: 'Repository events — use /activity owner/repo or add a repo: badge',
   },
   {
     command: '/branches',
-    description: 'Branches — use /branches owner/repo',
+    description: 'Branches — use /branches owner/repo or add a repo: badge',
   },
   {
     command: '/commits',
-    description: 'Recent commits — use /commits owner/repo',
+    description: 'Recent commits — use /commits owner/repo or add a repo: badge',
   },
   {
     command: '/releases',
-    description: 'Releases — use /releases owner/repo',
+    description: 'Releases — use /releases owner/repo or add a repo: badge',
   },
   {
     command: '/repos',
@@ -657,15 +657,15 @@ const SLASH_COMMANDS = [
   },
   {
     command: '/repo',
-    description: 'Repository summary — use /repo owner/repo',
+    description: 'Repository summary — use /repo owner/repo or add a repo: badge',
   },
   {
     command: '/tags',
-    description: 'Tags — use /tags owner/repo',
+    description: 'Tags — use /tags owner/repo or add a repo: badge',
   },
   {
     command: '/ci',
-    description: 'Actions workflow runs — use /ci owner/repo',
+    description: 'Actions workflow runs — use /ci owner/repo or add a repo: badge',
   },
   {
     command: '/theme',
@@ -709,8 +709,18 @@ function buildReposLocalFilterText(inputLine) {
  * @param {{ filterText: string }} repoParsed
  */
 function buildRepoViewLocalFilterText(repoParsed) {
-  const pillTerms = searchFilters.map((f) => f.value);
+  const pillTerms = searchFilters.filter((f) => f.kind !== 'repo').map((f) => f.value);
   return [repoParsed.filterText, ...pillTerms].filter(Boolean).join(' ');
+}
+
+function activeRepoBadgeValue() {
+  for (let i = searchFilters.length - 1; i >= 0; i -= 1) {
+    const filter = searchFilters[i];
+    if (filter.kind === 'repo' && /^\S+\/\S+$/.test(filter.value)) {
+      return filter.value;
+    }
+  }
+  return '';
 }
 
 function isPrCommand(trimmed) {
@@ -966,14 +976,28 @@ function prCommandFilterText(trimmed) {
  * @returns {{ kind: string, fullName: string, filterText: string } | null}
  */
 function parseRepoViewCommand(trimmed) {
-  const m = trimmed.match(
-    /^\/(repo|releases|ci|tags|branches|commits|activity)\s+(\S+\/\S+)(?:\s+(.*))?$/i,
-  );
+  const m = trimmed.match(/^\/(repo|releases|ci|tags|branches|commits|activity)(?:\s+(.*))?$/i);
   if (!m) return null;
+  const kind = m[1].toLowerCase();
+  const rest = (m[2] || '').trim();
+  const repoBadge = activeRepoBadgeValue();
+  if (!rest) {
+    if (!repoBadge) return null;
+    return { kind, fullName: repoBadge, filterText: '' };
+  }
+  const [firstTok, ...tail] = rest.split(/\s+/);
+  if (firstTok.includes('/')) {
+    return {
+      kind,
+      fullName: firstTok,
+      filterText: tail.join(' ').trim(),
+    };
+  }
+  if (!repoBadge) return null;
   return {
-    kind: m[1].toLowerCase(),
-    fullName: m[2],
-    filterText: (m[3] || '').trim(),
+    kind,
+    fullName: repoBadge,
+    filterText: rest,
   };
 }
 
@@ -985,9 +1009,10 @@ function isRepoViewIncomplete(trimmed) {
   const m = trimmed.match(/^\/(repo|releases|ci|tags|branches|commits|activity)(?:\s+(.*))?$/i);
   if (!m) return false;
   const rest = (m[2] || '').trim();
-  if (!rest) return true;
+  const repoBadge = activeRepoBadgeValue();
+  if (!rest) return !repoBadge;
   const firstTok = rest.split(/\s+/)[0];
-  if (!firstTok.includes('/')) return true;
+  if (!firstTok.includes('/')) return !repoBadge;
   return false;
 }
 
@@ -2071,7 +2096,7 @@ async function runSearch(options = {}) {
     items = [];
     activeIndex = -1;
     setHint(
-      'These commands need **owner/repo** after the slash — e.g. /ci octocat/Hello-World, /repo org/name, /releases org/name. Same pattern for /activity, /branches, /commits, /tags.',
+      'Add owner/repo after the command, or use a repo: badge first — for example /ci octocat/Hello-World or repo:octocat/Hello-World + /ci.',
       { muted: true },
     );
     setLoading(false);
