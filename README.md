@@ -65,7 +65,10 @@ GitCP registers **several** global shortcuts when possible; the first one that s
 
 Windows/Linux: **Ctrl+Shift+P**, **Ctrl+Alt+P+R**, **Ctrl+Alt+P**, **Alt+Space**.
 
-If **none** of them register (system shortcuts already taken), use the **menu bar** icon on macOS or **system tray** on Windows/Linux — click it to open the palette.
+If **none** of them register (system shortcuts already taken), use the **menu bar** icon on macOS or **system tray** on Windows/Linux.
+
+- macOS: look for **GitCP** in the menu bar, click it to open the dropdown, then choose **Open GitCP**, **Sign In / Sign Out**, or **Quit**.
+- Windows/Linux: left-click the tray icon to open the palette; right-click for the tray menu.
 
 **Technical note:** The preload script must load correctly (`preload.cjs`). If the UI shows “preload failed”, reinstall deps or run `bun install` from this repo.
 

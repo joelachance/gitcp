@@ -2,6 +2,7 @@ import './env.js';
 import {
   app,
   BrowserWindow,
+  dialog,
   globalShortcut,
   ipcMain,
   Menu,
@@ -109,6 +110,7 @@ function broadcastAuth() {
   for (const w of BrowserWindow.getAllWindows()) {
     w.webContents.send('gitcp:auth-changed', state);
   }
+  refreshTrayMenu();
 }
 
 function revealPalette() {
@@ -139,22 +141,49 @@ function hidePalette() {
 }
 
 function createTrayIcon() {
-  const buf = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-    'base64',
-  );
-  return nativeImage.createFromBuffer(buf);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+      <rect x="2.25" y="3" width="13.5" height="12" rx="2.75" fill="none" stroke="black" stroke-width="1.5"/>
+      <path d="M5.75 6.75 7.9 8.95 5.75 11.15" fill="none" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M9.2 11.1h3.2" fill="none" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  `.trim();
+  const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+  const size = process.platform === 'darwin' ? 18 : 16;
+  const icon = nativeImage.createFromDataURL(dataUrl).resize({ width: size, height: size });
+  if (process.platform === 'darwin') {
+    icon.setTemplateImage(true);
+  }
+  return icon;
 }
 
-function createTray() {
-  if (tray) return;
-  tray = new Tray(createTrayIcon());
-  tray.setToolTip('GitCP — click to open palette');
-  const menu = Menu.buildFromTemplate([
+function authMenuItemTemplate(authState) {
+  if (!authState.loggedIn) {
+    return {
+      label: 'Sign In with GitHub',
+      click: () => {
+        void signInFromTray();
+      },
+    };
+  }
+
+  return {
+    label: authState.login ? `Sign Out (${authState.login})` : 'Sign Out',
+    click: () => {
+      signOut();
+    },
+  };
+}
+
+function buildTrayMenu() {
+  const authState = getAuthState();
+  return Menu.buildFromTemplate([
     {
       label: 'Open GitCP',
       click: () => showPalette(),
     },
+    { type: 'separator' },
+    authMenuItemTemplate(authState),
     { type: 'separator' },
     {
       label: 'Quit',
@@ -164,8 +193,74 @@ function createTray() {
       },
     },
   ]);
+}
+
+function refreshTrayMenu() {
+  if (!tray) return null;
+  const authState = getAuthState();
+  const tooltip =
+    authState.loggedIn && authState.login
+      ? `GitCP — signed in as ${authState.login}`
+      : 'GitCP — not signed in';
+  if (process.platform === 'darwin') {
+    tray.setTitle('GitCP');
+  }
+  tray.setToolTip(tooltip);
+  const menu = buildTrayMenu();
   tray.setContextMenu(menu);
-  tray.on('click', () => showPalette());
+  return menu;
+}
+
+function getErrorMessage(error, fallback) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
+async function signIn() {
+  await loginWithOAuth();
+  clearSearchIssuesCache();
+  clearRepoViewCache();
+  broadcastAuth();
+  return getAuthState();
+}
+
+function signOut() {
+  logout();
+  clearSearchIssuesCache();
+  clearRepoViewCache();
+  broadcastAuth();
+  return getAuthState();
+}
+
+async function signInFromTray() {
+  try {
+    await signIn();
+  } catch (error) {
+    dialog.showErrorBox(
+      'GitCP Sign-In Failed',
+      getErrorMessage(error, 'GitHub sign-in did not complete.'),
+    );
+  }
+}
+
+function createTray() {
+  if (tray) return;
+  tray = new Tray(createTrayIcon());
+  refreshTrayMenu();
+  tray.on('click', () => {
+    if (process.platform === 'darwin') {
+      const menu = refreshTrayMenu();
+      tray.popUpContextMenu(menu ?? undefined);
+      return;
+    }
+    showPalette();
+  });
+  tray.on('right-click', () => {
+    const menu = refreshTrayMenu();
+    tray.popUpContextMenu(menu ?? undefined);
+  });
 }
 
 function unregisterAllShortcuts() {
@@ -485,18 +580,10 @@ function setupIpc() {
   ipcMain.handle('gitcp:auth-status', () => getAuthState());
 
   ipcMain.handle('gitcp:login', async () => {
-    await loginWithOAuth();
-    broadcastAuth();
-    return getAuthState();
+    return signIn();
   });
 
-  ipcMain.handle('gitcp:logout', () => {
-    logout();
-    clearSearchIssuesCache();
-    clearRepoViewCache();
-    broadcastAuth();
-    return getAuthState();
-  });
+  ipcMain.handle('gitcp:logout', () => signOut());
 
   ipcMain.handle('gitcp:llm-keys-status', () => llmKeysStatus());
 
