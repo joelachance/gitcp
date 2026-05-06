@@ -13,6 +13,8 @@ const GITCP_THEMES = [
 
 const HOME_COMMANDS = ['/issues', '/pr', '/ai', '/ci'];
 const SEARCH_RESULT_CACHE_TTL_MS = 30_000;
+const HOME_EMPTY_HINT =
+  'Type to search GitHub issues and pull requests, press / for commands, or use + for repo/user/org filters.';
 
 const searchInput = document.getElementById('query');
 const resultsEl = document.getElementById('results');
@@ -51,6 +53,9 @@ let reposListCache = null;
 
 /** Latest plain GitHub search snapshot; reused for exact re-open and incremental local previews. */
 let searchResultsCache = null;
+
+/** Latest slash repo view rows for `/repo`, `/ci`, `/branches`, etc. */
+let repoViewListCache = null;
 
 /**
  * `/repos` drill-down: selecting a catalog row (Enter) opens an in-app menu instead of GitHub.
@@ -325,13 +330,6 @@ function refreshSearch() {
   if (repoBrowseState) {
     return;
   }
-  if (isIssuesCommand(inputLine)) {
-    issuesListCache = null;
-  } else if (isPrCommand(inputLine)) {
-    prsListCache = null;
-  } else if (isReposCommand(inputLine)) {
-    reposListCache = null;
-  }
   if (isApiKeysCommand(inputLine)) {
     void runSearch({ forceSearchRefresh: true });
     return;
@@ -427,6 +425,15 @@ function buildHomeItems() {
   });
 }
 
+function renderHomeState() {
+  items = buildHomeItems();
+  activeIndex = -1;
+  setHint(HOME_EMPTY_HINT, { muted: true });
+  setLoading(false);
+  renderResults();
+  updateRefreshHint();
+}
+
 function previewPlainSearchFromCache() {
   const trimmed = searchInput.value.trim();
   if (!isPlainSearchInput(trimmed)) return false;
@@ -455,6 +462,32 @@ function previewPlainSearchFromCache() {
   setLoading(true);
   updateRefreshHint();
   return true;
+}
+
+function getRepoViewItemNoun(kind) {
+  const labels = {
+    repo: 'repository',
+    releases: 'release',
+    ci: 'workflow run',
+    tags: 'tag',
+    branches: 'branch',
+    commits: 'commit',
+    activity: 'event',
+  };
+  return labels[kind] ?? 'item';
+}
+
+function getFreshRepoViewListCache(kind, fullName) {
+  if (!repoViewListCache) return null;
+  if (repoViewListCache.kind !== kind || repoViewListCache.fullName !== fullName) return null;
+  if (Date.now() - repoViewListCache.fetchedAt > SEARCH_RESULT_CACHE_TTL_MS) return null;
+  return repoViewListCache;
+}
+
+function getStaleRepoViewListCache(kind, fullName) {
+  if (!repoViewListCache) return null;
+  if (repoViewListCache.kind !== kind || repoViewListCache.fullName !== fullName) return null;
+  return repoViewListCache;
 }
 
 function buildIssuesLocalFilterText(inputLine) {
@@ -1677,6 +1710,7 @@ async function runSearch(options = {}) {
     issuesListCache = null;
     prsListCache = null;
     reposListCache = null;
+    repoViewListCache = null;
     if (aiTranscript.length > 0) {
       items = transcriptToItems();
       activeIndex = -1;
@@ -1716,6 +1750,7 @@ async function runSearch(options = {}) {
     issuesListCache = null;
     prsListCache = null;
     reposListCache = null;
+    repoViewListCache = null;
     items = [];
     activeIndex = -1;
     setHint(
@@ -1733,6 +1768,7 @@ async function runSearch(options = {}) {
     issuesListCache = null;
     prsListCache = null;
     reposListCache = null;
+    repoViewListCache = null;
     if (aiTranscript.length > 0) {
       items = transcriptToItems();
       activeIndex = -1;
@@ -1742,14 +1778,7 @@ async function runSearch(options = {}) {
       updateRefreshHint();
       return;
     }
-    items = buildHomeItems();
-    activeIndex = -1;
-    setHint('Type to search GitHub issues and pull requests, press / for commands, or use + for repo/user/org filters.', {
-      muted: true,
-    });
-    setLoading(false);
-    renderResults();
-    updateRefreshHint();
+    renderHomeState();
     return;
   }
 
@@ -1758,15 +1787,41 @@ async function runSearch(options = {}) {
   if (isPrCommand(inputLine)) {
     clearAiChatTranscript();
     reposListCache = null;
+    repoViewListCache = null;
     const combinedFilter = buildPrLocalFilterText(inputLine);
-    setHint('');
-    items = [];
-    activeIndex = -1;
-    renderResults();
-    const needFetch = !prsListCache;
+    const cachedPrs = prsListCache;
+    const needFetch = forceSearchRefresh || !cachedPrs;
+    if (cachedPrs) {
+      const filtered = filterIssuesBySearchText(cachedPrs, combinedFilter);
+      items = filtered;
+      activeIndex = items.length ? 0 : -1;
+      const n = cachedPrs.length;
+      const refreshingSuffix = forceSearchRefresh ? ' · refreshing…' : '';
+      if (combinedFilter) {
+        setHint(
+          items.length
+            ? `${items.length} of ${n} pull request${n === 1 ? '' : 's'} match${refreshingSuffix}`
+            : `No matches in ${n} pull request${n === 1 ? '' : 's'}${refreshingSuffix}`,
+          { muted: true },
+        );
+      } else {
+        setHint(
+          n
+            ? `${n} pull request${n === 1 ? '' : 's'} (open & closed) in repos you can access${refreshingSuffix}`
+            : `No pull requests in repos you can access${refreshingSuffix}`,
+          { muted: true },
+        );
+      }
+      renderResults();
+    } else {
+      setHint('');
+      items = [];
+      activeIndex = -1;
+      renderResults();
+    }
     setLoading(needFetch);
     try {
-      if (!prsListCache) {
+      if (needFetch) {
         const data = await api().listAccessibleIssues({
           state: 'all',
           pullRequestsOnly: true,
@@ -1810,15 +1865,41 @@ async function runSearch(options = {}) {
   if (isIssuesCommand(inputLine)) {
     clearAiChatTranscript();
     reposListCache = null;
+    repoViewListCache = null;
     const combinedFilter = buildIssuesLocalFilterText(inputLine);
-    setHint('');
-    items = [];
-    activeIndex = -1;
-    renderResults();
-    const needFetch = !issuesListCache;
+    const cachedIssues = issuesListCache;
+    const needFetch = forceSearchRefresh || !cachedIssues;
+    if (cachedIssues) {
+      const filtered = filterIssuesBySearchText(cachedIssues, combinedFilter);
+      items = filtered;
+      activeIndex = items.length ? 0 : -1;
+      const n = cachedIssues.length;
+      const refreshingSuffix = forceSearchRefresh ? ' · refreshing…' : '';
+      if (combinedFilter) {
+        setHint(
+          items.length
+            ? `${items.length} of ${n} issue${n === 1 ? '' : 's'} match${refreshingSuffix}`
+            : `No matches in ${n} open issue${n === 1 ? '' : 's'}${refreshingSuffix}`,
+          { muted: true },
+        );
+      } else {
+        setHint(
+          n
+            ? `${n} open issue${n === 1 ? '' : 's'} in repos you can access${refreshingSuffix}`
+            : `No open issues in repos you can access${refreshingSuffix}`,
+          { muted: true },
+        );
+      }
+      renderResults();
+    } else {
+      setHint('');
+      items = [];
+      activeIndex = -1;
+      renderResults();
+    }
     setLoading(needFetch);
     try {
-      if (!issuesListCache) {
+      if (needFetch) {
         const data = await api().listAccessibleIssues();
         if (seq !== loadSeq) return;
         issuesListCache = data.items ?? [];
@@ -1869,15 +1950,41 @@ async function runSearch(options = {}) {
     clearAiChatTranscript();
     issuesListCache = null;
     prsListCache = null;
+    repoViewListCache = null;
     const combinedFilter = buildReposLocalFilterText(inputLine);
-    setHint('');
-    items = [];
-    activeIndex = -1;
-    renderResults();
-    const needFetch = !reposListCache;
+    const cachedRepos = reposListCache;
+    const needFetch = forceSearchRefresh || !cachedRepos;
+    if (cachedRepos) {
+      const filtered = filterRepoViewRows(cachedRepos, combinedFilter);
+      items = filtered;
+      activeIndex = items.length ? 0 : -1;
+      const n = cachedRepos.length;
+      const refreshingSuffix = forceSearchRefresh ? ' · refreshing…' : '';
+      if (combinedFilter) {
+        setHint(
+          items.length
+            ? `${items.length} of ${n} repo${n === 1 ? '' : 's'} match${refreshingSuffix}`
+            : `No matches in ${n} repo${n === 1 ? '' : 's'}${refreshingSuffix}`,
+          { muted: true },
+        );
+      } else {
+        setHint(
+          n
+            ? `${n} repo${n === 1 ? '' : 's'} · pushed recently first · CI = GitHub Actions workflows on the default branch${refreshingSuffix}`
+            : `No repositories returned for your account${refreshingSuffix}`,
+          { muted: true },
+        );
+      }
+      renderResults();
+    } else {
+      setHint('');
+      items = [];
+      activeIndex = -1;
+      renderResults();
+    }
     setLoading(needFetch);
     try {
-      if (!reposListCache) {
+      if (needFetch) {
         const data = await api().listReposWithCi();
         if (seq !== loadSeq) return;
         reposListCache = (data.items ?? []).map((r) => ({
@@ -1924,7 +2031,62 @@ async function runSearch(options = {}) {
     issuesListCache = null;
     prsListCache = null;
     reposListCache = null;
-    setHint('');
+    const combinedFilter = buildRepoViewLocalFilterText(repoParsed);
+    const freshRepoViewCache = !forceSearchRefresh
+      ? getFreshRepoViewListCache(repoParsed.kind, repoParsed.fullName)
+      : null;
+    if (freshRepoViewCache) {
+      const filtered = filterRepoViewRows(freshRepoViewCache.rows, combinedFilter);
+      items = filtered;
+      activeIndex = items.length ? 0 : -1;
+      const total = freshRepoViewCache.rows.length;
+      const noun = getRepoViewItemNoun(repoParsed.kind);
+      if (combinedFilter) {
+        setHint(
+          items.length
+            ? `${items.length} of ${total} ${noun}${total === 1 ? '' : 's'} match`
+            : `No matches in ${total} ${noun}${total === 1 ? '' : 's'}`,
+          { muted: true },
+        );
+      } else {
+        setHint(
+          total
+            ? `${total} ${noun}${total === 1 ? '' : 's'} · ${repoParsed.fullName}`
+            : `No ${noun}s · ${repoParsed.fullName}`,
+          { muted: true },
+        );
+      }
+      setLoading(false);
+      renderResults();
+      updateRefreshHint();
+      return;
+    }
+    const staleRepoViewCache = getStaleRepoViewListCache(repoParsed.kind, repoParsed.fullName);
+    if (staleRepoViewCache) {
+      const filtered = filterRepoViewRows(staleRepoViewCache.rows, combinedFilter);
+      items = filtered;
+      activeIndex = items.length ? 0 : -1;
+      const total = staleRepoViewCache.rows.length;
+      const noun = getRepoViewItemNoun(repoParsed.kind);
+      if (combinedFilter) {
+        setHint(
+          items.length
+            ? `${items.length} of ${total} ${noun}${total === 1 ? '' : 's'} match · refreshing…`
+            : `No matches in ${total} ${noun}${total === 1 ? '' : 's'} · refreshing…`,
+          { muted: true },
+        );
+      } else {
+        setHint(
+          total
+            ? `${total} ${noun}${total === 1 ? '' : 's'} · ${repoParsed.fullName} · refreshing…`
+            : `No ${noun}s · ${repoParsed.fullName} · refreshing…`,
+          { muted: true },
+        );
+      }
+      renderResults();
+    } else {
+      setHint('');
+    }
     setLoading(true);
     try {
       const data = await api().repoView({
@@ -1955,21 +2117,17 @@ async function runSearch(options = {}) {
         ...r,
         __repoView: true,
       }));
-      const combinedFilter = buildRepoViewLocalFilterText(repoParsed);
+      repoViewListCache = {
+        kind: repoParsed.kind,
+        fullName: repoParsed.fullName,
+        rows,
+        fetchedAt: Date.now(),
+      };
       const filtered = filterRepoViewRows(rows, combinedFilter);
       items = filtered;
       activeIndex = items.length ? 0 : -1;
       const total = rows.length;
-      const labels = {
-        repo: 'repository',
-        releases: 'release',
-        ci: 'workflow run',
-        tags: 'tag',
-        branches: 'branch',
-        commits: 'commit',
-        activity: 'event',
-      };
-      const noun = labels[repoParsed.kind] ?? 'item';
+      const noun = getRepoViewItemNoun(repoParsed.kind);
       if (combinedFilter) {
         setHint(
           items.length
@@ -2031,6 +2189,7 @@ async function runSearch(options = {}) {
   issuesListCache = null;
   prsListCache = null;
   reposListCache = null;
+  repoViewListCache = null;
   clearAiChatTranscript();
   const freshCachedSearch = !forceSearchRefresh ? getFreshSearchResultsCache(q) : null;
   if (freshCachedSearch) {
@@ -2047,10 +2206,24 @@ async function runSearch(options = {}) {
     updateRefreshHint();
     return;
   }
-  setHint('');
-  items = [];
-  activeIndex = -1;
-  renderResults();
+  const staleCachedSearch =
+    forceSearchRefresh && searchResultsCache?.query === q ? searchResultsCache : null;
+  if (staleCachedSearch) {
+    items = staleCachedSearch.items;
+    activeIndex = items.length ? 0 : -1;
+    setHint(
+      items.length
+        ? `${items.length} cached result${items.length === 1 ? '' : 's'} · refreshing GitHub…`
+        : 'Refreshing GitHub…',
+      { muted: true },
+    );
+    renderResults();
+  } else {
+    setHint('');
+    items = [];
+    activeIndex = -1;
+    renderResults();
+  }
   setLoading(true);
   try {
     const data = await api().searchIssues(q, {
@@ -2089,15 +2262,7 @@ function scheduleSearch() {
   const t = searchInput.value.trimStart();
   const trimmed = searchInput.value.trim();
   if (!previewPlainSearchFromCache() && !trimmed && searchFilters.length === 0 && aiTranscript.length === 0) {
-    items = buildHomeItems();
-    activeIndex = -1;
-    setHint(
-      'Type to search GitHub issues and pull requests, press / for commands, or use + for repo/user/org filters.',
-      { muted: true },
-    );
-    setLoading(false);
-    renderResults();
-    updateRefreshHint();
+    renderHomeState();
   }
   const instantIssues =
     t === '/issues' ||
