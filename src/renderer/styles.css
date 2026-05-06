@@ -38,6 +38,39 @@ html[data-theme='github'] {
   --cp-status-closed-pr: #cf222e;
 }
 
+html[data-theme='paper'] {
+  --cp-text: #1f2328;
+  --cp-muted: #59636e;
+  --cp-shell-bg: #f6f8fa;
+  --cp-field-bg: #ffffff;
+  --cp-border: #d0d7de;
+  --cp-accent: #0969da;
+  --cp-focus-ring: rgba(9, 105, 218, 0.18);
+  --cp-surface-elevated: #ffffff;
+  --cp-surface-hover: #eef3f8;
+  --cp-row-divider: #d8dee4;
+  --cp-link: #0969da;
+  --cp-hint-error: #cf222e;
+  --cp-dismiss-hover-bg: rgba(31, 35, 40, 0.06);
+  --cp-menu-shadow: rgba(31, 35, 40, 0.16);
+  --cp-filter-repo-fg: #0969da;
+  --cp-filter-repo-border: rgba(9, 105, 218, 0.24);
+  --cp-filter-repo-bg: rgba(9, 105, 218, 0.08);
+  --cp-filter-user-fg: #1a7f37;
+  --cp-filter-user-border: rgba(26, 127, 55, 0.24);
+  --cp-filter-user-bg: rgba(26, 127, 55, 0.08);
+  --cp-filter-org-fg: #9a6700;
+  --cp-filter-org-border: rgba(154, 103, 0, 0.22);
+  --cp-filter-org-bg: rgba(154, 103, 0, 0.08);
+  --cp-spinner-track: #d0d7de;
+  --cp-spinner-head: #59636e;
+  --cp-status-open: #1a7f37;
+  --cp-status-closed-issue: #8250df;
+  --cp-status-draft: #6e7781;
+  --cp-status-merged: #8250df;
+  --cp-status-closed-pr: #cf222e;
+}
+
 html[data-theme='arctic'] {
   --cp-text: #e8f4fa;
   --cp-muted: #8fb3c9;

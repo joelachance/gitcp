@@ -4,6 +4,7 @@ const THEME_STORAGE_KEY = 'gitcp.theme';
 
 const GITCP_THEMES = [
   { id: 'github', title: 'GitHub dark', subtitle: 'Blue accents (default)' },
+  { id: 'paper', title: 'GitHub light', subtitle: 'Soft paper whites with GitHub blue' },
   { id: 'arctic', title: 'Arctic glass', subtitle: 'Icy cyan on cool slate' },
   { id: 'plum', title: 'Plum HUD', subtitle: 'Electric magenta on purple gray' },
   { id: 'rose', title: 'Rose voltage', subtitle: 'Warm magenta-rose' },
