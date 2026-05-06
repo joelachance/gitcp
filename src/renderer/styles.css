@@ -10,7 +10,7 @@ html[data-theme='github'] {
   --cp-muted: #8b949e;
   --cp-shell-bg: #161b22;
   --cp-field-bg: #0d1117;
-  --cp-border: #30363d;
+  --cp-border: rgba(139, 148, 158, 0.22);
   --cp-accent: #58a6ff;
   --cp-focus-ring: rgba(88, 166, 255, 0.22);
   --cp-surface-elevated: #21262d;
@@ -44,11 +44,11 @@ html[data-theme='paper'] {
   --cp-muted: #59636e;
   --cp-shell-bg: #f6f8fa;
   --cp-field-bg: #ffffff;
-  --cp-border: #d0d7de;
+  --cp-border: rgba(31, 35, 40, 0.12);
   --cp-accent: #0969da;
   --cp-focus-ring: rgba(9, 105, 218, 0.18);
   --cp-surface-elevated: #ffffff;
-  --cp-surface-hover: #eef3f8;
+  --cp-surface-hover: #e1e8f0;
   --cp-row-divider: #d8dee4;
   --cp-link: #0969da;
   --cp-hint-error: #cf222e;
@@ -78,7 +78,7 @@ html[data-theme='arctic'] {
   --cp-muted: #8fb3c9;
   --cp-shell-bg: #0f1822;
   --cp-field-bg: #0a1218;
-  --cp-border: #2a4555;
+  --cp-border: rgba(143, 179, 201, 0.18);
   --cp-accent: #22d3ee;
   --cp-focus-ring: rgba(34, 211, 238, 0.22);
   --cp-surface-elevated: #152028;
@@ -112,7 +112,7 @@ html[data-theme='plum'] {
   --cp-muted: #c9b0d4;
   --cp-shell-bg: #18101f;
   --cp-field-bg: #100a14;
-  --cp-border: #4a3058;
+  --cp-border: rgba(201, 176, 212, 0.18);
   --cp-accent: #e879f9;
   --cp-focus-ring: rgba(232, 121, 249, 0.22);
   --cp-surface-elevated: #24182e;
@@ -146,7 +146,7 @@ html[data-theme='rose'] {
   --cp-muted: #d4a8bc;
   --cp-shell-bg: #1c1018;
   --cp-field-bg: #140a12;
-  --cp-border: #523045;
+  --cp-border: rgba(212, 168, 188, 0.18);
   --cp-accent: #f472b6;
   --cp-focus-ring: rgba(244, 114, 182, 0.22);
   --cp-surface-elevated: #281420;
@@ -180,7 +180,7 @@ html[data-theme='split'] {
   --cp-muted: #a8b8e8;
   --cp-shell-bg: #121826;
   --cp-field-bg: #0c1018;
-  --cp-border: #354064;
+  --cp-border: rgba(168, 184, 232, 0.18);
   --cp-accent: #06b6d4;
   --cp-focus-ring: rgba(6, 182, 212, 0.22);
   --cp-surface-elevated: #1a2338;
@@ -862,7 +862,7 @@ body {
 }
 
 .profile-button:hover {
-  background: var(--cp-border);
+  background: var(--cp-surface-hover);
 }
 
 .profile-button:focus-visible {

@@ -11,6 +11,9 @@ const GITCP_THEMES = [
   { id: 'split', title: 'Split neon', subtitle: 'Cyan + magenta highlights' },
 ];
 
+const HOME_COMMANDS = ['/issues', '/pr', '/ai', '/ci'];
+const SEARCH_RESULT_CACHE_TTL_MS = 30_000;
+
 const searchInput = document.getElementById('query');
 const resultsEl = document.getElementById('results');
 const resultsRefreshHintEl = document.getElementById('results-refresh-hint');
@@ -45,6 +48,9 @@ let prsListCache = null;
 
 /** Rows from `/repos` (repos + CI summary); reused while the query stays in that mode. */
 let reposListCache = null;
+
+/** Latest plain GitHub search snapshot; reused for exact re-open and incremental local previews. */
+let searchResultsCache = null;
 
 /**
  * `/repos` drill-down: selecting a catalog row (Enter) opens an in-app menu instead of GitHub.
@@ -345,6 +351,110 @@ function buildSearchQuery() {
   const free = searchInput.value.trim();
   if (free) parts.push(free);
   return parts.join(' ').trim();
+}
+
+function normalizeSearchText(text) {
+  return String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function tokenizeSearchText(text) {
+  return normalizeSearchText(text).split(' ').filter(Boolean);
+}
+
+function buildSearchItemHaystack(item) {
+  const kind = item.pull_request ? 'pull request pr' : 'issue';
+  return [
+    item.title,
+    item.repository?.full_name,
+    item.number,
+    item.state,
+    kind,
+    item.user?.login,
+    item.assignee?.login,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function filterSearchResultsByQuery(list, query) {
+  const terms = tokenizeSearchText(query);
+  if (terms.length === 0) return list;
+  return list.filter((item) => {
+    const hay = buildSearchItemHaystack(item);
+    return terms.every((t) => hay.includes(t));
+  });
+}
+
+function isPlainSearchInput(trimmed) {
+  if (!trimmed && searchFilters.length === 0) return false;
+  if (isThemeCommand(trimmed)) return false;
+  if (isSignOutCommand(trimmed)) return false;
+  if (isApiKeysCommand(trimmed)) return false;
+  if (isAiCommand(trimmed)) return false;
+  if (shouldShowSlashCommands(trimmed)) return false;
+  if (isIssuesCommand(trimmed)) return false;
+  if (isPrCommand(trimmed)) return false;
+  if (isReposCommand(trimmed)) return false;
+  if (isRepoViewIncomplete(trimmed)) return false;
+  if (Boolean(parseRepoViewCommand(trimmed))) return false;
+  return Boolean(buildSearchQuery());
+}
+
+function getFreshSearchResultsCache(query) {
+  if (!searchResultsCache) return null;
+  if (searchResultsCache.query !== query) return null;
+  if (Date.now() - searchResultsCache.fetchedAt > SEARCH_RESULT_CACHE_TTL_MS) return null;
+  return searchResultsCache;
+}
+
+function canPreviewSearchResultsFromCache(query) {
+  if (!searchResultsCache?.query || !Array.isArray(searchResultsCache.items)) return false;
+  const next = normalizeSearchText(query);
+  const prev = normalizeSearchText(searchResultsCache.query);
+  if (!next || !prev) return false;
+  return next === prev || next.startsWith(prev);
+}
+
+function buildHomeItems() {
+  return HOME_COMMANDS.map((command) => {
+    const match = SLASH_COMMANDS.find((item) => item.command === command);
+    return {
+      __slashCommand: true,
+      command,
+      description: match?.description || '',
+    };
+  });
+}
+
+function previewPlainSearchFromCache() {
+  const trimmed = searchInput.value.trim();
+  if (!isPlainSearchInput(trimmed)) return false;
+  const query = buildSearchQuery();
+  if (!canPreviewSearchResultsFromCache(query)) return false;
+  const filtered = filterSearchResultsByQuery(searchResultsCache.items, query);
+  items = filtered;
+  activeIndex = filtered.length ? 0 : -1;
+  const total = searchResultsCache.items.length;
+  if (query === searchResultsCache.query) {
+    setHint(
+      total
+        ? `${total} cached result${total === 1 ? '' : 's'} · refreshing GitHub…`
+        : 'Searching GitHub…',
+      { muted: true },
+    );
+  } else {
+    setHint(
+      filtered.length
+        ? `${filtered.length} of ${total} cached result${total === 1 ? '' : 's'} match · refreshing GitHub…`
+        : 'No cached matches · searching GitHub…',
+      { muted: true },
+    );
+  }
+  renderResults();
+  setLoading(true);
+  updateRefreshHint();
+  return true;
 }
 
 function buildIssuesLocalFilterText(inputLine) {
@@ -1632,9 +1742,11 @@ async function runSearch(options = {}) {
       updateRefreshHint();
       return;
     }
-    items = [];
+    items = buildHomeItems();
     activeIndex = -1;
-    setHint('');
+    setHint('Type to search GitHub issues and pull requests, press / for commands, or use + for repo/user/org filters.', {
+      muted: true,
+    });
     setLoading(false);
     renderResults();
     updateRefreshHint();
@@ -1920,18 +2032,46 @@ async function runSearch(options = {}) {
   prsListCache = null;
   reposListCache = null;
   clearAiChatTranscript();
+  const freshCachedSearch = !forceSearchRefresh ? getFreshSearchResultsCache(q) : null;
+  if (freshCachedSearch) {
+    items = freshCachedSearch.items;
+    activeIndex = items.length ? 0 : -1;
+    setHint(
+      items.length
+        ? `${items.length} cached result${items.length === 1 ? '' : 's'} · ${refreshShortcutLabel()} to refresh`
+        : 'No cached results for this search',
+      { muted: true },
+    );
+    setLoading(false);
+    renderResults();
+    updateRefreshHint();
+    return;
+  }
   setHint('');
   items = [];
   activeIndex = -1;
   renderResults();
   setLoading(true);
   try {
-    const data = await api().searchIssues(buildSearchQuery(), {
+    const data = await api().searchIssues(q, {
       forceRefresh: forceSearchRefresh,
     });
     if (seq !== loadSeq) return;
     items = data.items ?? [];
     activeIndex = items.length ? 0 : -1;
+    searchResultsCache = {
+      query: q,
+      items,
+      fetchedAt: Date.now(),
+    };
+    if (items.length === 0) {
+      setHint(
+        `No issues or pull requests matched. Try /issues, /pr, or narrow with repo/user/org filters.`,
+        { muted: true },
+      );
+    } else {
+      setHint('');
+    }
     renderResults();
   } catch (err) {
     items = [];
@@ -1948,6 +2088,17 @@ function scheduleSearch() {
   clearTimeout(debounceTimer);
   const t = searchInput.value.trimStart();
   const trimmed = searchInput.value.trim();
+  if (!previewPlainSearchFromCache() && !trimmed && searchFilters.length === 0 && aiTranscript.length === 0) {
+    items = buildHomeItems();
+    activeIndex = -1;
+    setHint(
+      'Type to search GitHub issues and pull requests, press / for commands, or use + for repo/user/org filters.',
+      { muted: true },
+    );
+    setLoading(false);
+    renderResults();
+    updateRefreshHint();
+  }
   const instantIssues =
     t === '/issues' ||
     t.startsWith('/issues ') ||
