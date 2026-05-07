@@ -23,6 +23,9 @@ const hintEl = document.getElementById('hint');
 const btnAuth = document.getElementById('btn-auth');
 const userAvatarEl = document.getElementById('user-avatar');
 const userAvatarPlaceholderEl = document.getElementById('user-avatar-placeholder');
+const authMenuEl = document.getElementById('auth-menu');
+const authMenuStatusEl = document.getElementById('auth-menu-status');
+const authMenuActionEl = document.getElementById('auth-menu-action');
 const appEl = document.getElementById('app');
 const loadSpinnerEl = document.getElementById('load-spinner');
 const btnFilterQualifier = document.getElementById('btn-filter-qualifier');
@@ -90,9 +93,56 @@ let themePickerWasOpen = false;
 let apiKeyDialogState = null;
 let currentAuthState = { loggedIn: false, login: null, avatarUrl: null };
 let pendingResultActionKey = '';
+let shortcutInfoCache = null;
 
 function api() {
   return window.gitcp;
+}
+
+const authMenuWrapEl = btnAuth?.closest('.text-box-profile');
+
+function setAuthMenuOpen(open) {
+  if (!btnAuth || !authMenuEl) return;
+  btnAuth.setAttribute('aria-expanded', open ? 'true' : 'false');
+  authMenuEl.classList.toggle('hidden', !open);
+  authMenuEl.setAttribute('aria-hidden', open ? 'false' : 'true');
+  updateWindowHeight();
+}
+
+function isAuthMenuOpen() {
+  return Boolean(authMenuEl && !authMenuEl.classList.contains('hidden'));
+}
+
+function updateAuthMenu() {
+  if (!authMenuStatusEl || !authMenuActionEl) return;
+  if (currentAuthState.loggedIn) {
+    authMenuStatusEl.textContent = currentAuthState.login
+      ? `Signed in as ${currentAuthState.login}`
+      : 'Signed in with GitHub';
+    authMenuActionEl.textContent = 'Sign out';
+    authMenuActionEl.setAttribute('aria-label', 'Sign out');
+  } else {
+    authMenuStatusEl.textContent = 'Not signed in';
+    authMenuActionEl.textContent = 'Sign in with GitHub';
+    authMenuActionEl.setAttribute('aria-label', 'Sign in with GitHub');
+  }
+}
+
+function openAuthMenu() {
+  updateAuthMenu();
+  setAuthMenuOpen(true);
+  requestAnimationFrame(() => {
+    authMenuActionEl?.focus();
+  });
+}
+
+function closeAuthMenu({ restoreFocus = false } = {}) {
+  setAuthMenuOpen(false);
+  if (restoreFocus) {
+    requestAnimationFrame(() => {
+      btnAuth?.focus();
+    });
+  }
 }
 
 function focusSearchInput({ select = false, preserveSelection = false } = {}) {
@@ -280,7 +330,7 @@ function refreshShortcutLabel() {
 function updateRefreshHint() {
   if (!resultsRefreshHintEl) return;
   const trimmed = searchInput.value.trim();
-  if (isThemeCommand(trimmed) || isAiCommand(trimmed) || shouldShowSlashCommands(trimmed)) {
+  if (isThemeCommand(trimmed) || isHelpCommand(trimmed) || isAiCommand(trimmed) || shouldShowSlashCommands(trimmed)) {
     resultsRefreshHintEl.textContent = '';
     resultsRefreshHintEl.classList.add('hidden');
     updateWindowHeight();
@@ -391,6 +441,7 @@ function isPlainSearchInput(trimmed) {
   if (isThemeCommand(trimmed)) return false;
   if (isSignOutCommand(trimmed)) return false;
   if (isApiKeysCommand(trimmed)) return false;
+  if (isHelpCommand(trimmed)) return false;
   if (isAiCommand(trimmed)) return false;
   if (shouldShowSlashCommands(trimmed)) return false;
   if (isIssuesCommand(trimmed)) return false;
@@ -683,6 +734,10 @@ const SLASH_COMMANDS = [
     command: '/api-keys',
     description: 'OpenAI & Anthropic API keys (env + saved)',
   },
+  {
+    command: '/help',
+    description: 'How badges, slash commands, shortcuts, and actions work',
+  },
 ];
 
 function isIssuesCommand(trimmed) {
@@ -742,6 +797,69 @@ function isSignOutCommand(trimmed) {
 function isApiKeysCommand(trimmed) {
   const lower = trimmed.toLowerCase();
   return lower === '/api-keys' || lower.startsWith('/api-keys ');
+}
+
+function isHelpCommand(trimmed) {
+  const lower = trimmed.toLowerCase();
+  return lower === '/help' || lower.startsWith('/help ');
+}
+
+function helpFilterQuery(trimmed) {
+  const lower = trimmed.toLowerCase();
+  if (!lower.startsWith('/help')) return '';
+  return trimmed.slice('/help'.length).trim().toLowerCase();
+}
+
+function formatShortcutLabel(shortcutInfo) {
+  return shortcutInfo?.accelerator || shortcutInfo?.primary || 'menu bar item';
+}
+
+function buildHelpItems(trimmed, shortcutInfo) {
+  const q = helpFilterQuery(trimmed);
+  const launchShortcut = formatShortcutLabel(shortcutInfo);
+  const helpRows = [
+    {
+      __helpRow: true,
+      title: 'Add badges',
+      description:
+        'Type repo:owner/name, user:octocat, or org:acme at the end of the input and press Enter to turn it into a badge. You can also press + to insert the qualifier first.',
+    },
+    {
+      __helpRow: true,
+      title: 'Use repo badges with repo commands',
+      description:
+        'A repo: badge can supply the repository for /ci, /repo, /branches, /commits, /releases, /tags, and /activity, so /ci works without retyping owner/repo.',
+    },
+    {
+      __helpRow: true,
+      title: 'Keyboard',
+      description:
+        `Launch with ${launchShortcut}. Enter opens the active row, Esc backs out or hides the palette, Tab reaches controls, and j/k or arrow keys move through results.`,
+    },
+    {
+      __helpRow: true,
+      title: 'Row actions',
+      description:
+        'Issue and PR rows can copy links, assign or unassign you, closed issues can reopen, branch rows can copy the branch name, and failed workflow rows can rerun failed jobs.',
+    },
+    {
+      __helpRow: true,
+      title: 'AI and auth',
+      description:
+        'Use /api-keys to configure OpenAI or Anthropic for /ai. The profile button signs you in or out of GitHub, and /sign-out is available from the command list too.',
+    },
+  ];
+  const commandRows = SLASH_COMMANDS.map((command) => ({
+    __slashCommand: true,
+    command: command.command,
+    description: command.description,
+  }));
+  const allRows = [...helpRows, ...commandRows];
+  if (!q) return allRows;
+  return allRows.filter((row) => {
+    const hay = `${row.title || ''} ${row.description || ''} ${row.command || ''}`.toLowerCase();
+    return hay.includes(q);
+  });
 }
 
 /** Text after `/ai` (empty if the user only typed `/ai`). */
@@ -1021,6 +1139,7 @@ function shouldShowSlashCommands(trimmed) {
   if (isThemeCommand(trimmed)) return false;
   if (isSignOutCommand(trimmed)) return false;
   if (isApiKeysCommand(trimmed)) return false;
+  if (isHelpCommand(trimmed)) return false;
   if (isAiCommand(trimmed)) return false;
   if (isIssuesCommand(trimmed)) return false;
   if (isReposCommand(trimmed)) return false;
@@ -1717,6 +1836,27 @@ function renderResults() {
       return;
     }
 
+    if (item.__helpRow) {
+      const main = document.createElement('div');
+      main.className = 'result-main';
+
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = item.title;
+
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = item.description;
+
+      main.appendChild(title);
+      main.appendChild(meta);
+      row.appendChild(main);
+      li.appendChild(row);
+      li.setAttribute('aria-label', `${item.title}: ${item.description}`);
+      resultsEl.appendChild(li);
+      return;
+    }
+
     if (item.__themeOption) {
       const main = document.createElement('div');
       main.className = 'result-main';
@@ -2004,6 +2144,29 @@ async function runSearch(options = {}) {
     renderResults();
     if (items.length) previewThemeSelection();
     else restoreCommittedTheme();
+    updateRefreshHint();
+    return;
+  }
+
+  if (isHelpCommand(inputLine)) {
+    clearAiChatTranscript();
+    try {
+      if (!shortcutInfoCache) {
+        shortcutInfoCache = await api().shortcutInfo();
+      }
+    } catch {
+      shortcutInfoCache = null;
+    }
+    items = buildHelpItems(inputLine, shortcutInfoCache);
+    activeIndex = items.findIndex((item) => item.__slashCommand);
+    if (activeIndex < 0) {
+      activeIndex = items.length ? 0 : -1;
+    }
+    setHint(items.length ? 'Use Enter on a slash command row to insert it.' : 'No matching help rows', {
+      muted: true,
+    });
+    setLoading(false);
+    renderResults();
     updateRefreshHint();
     return;
   }
@@ -2612,6 +2775,7 @@ function scheduleSearch() {
     isPrCommand(trimmed) ||
     isReposCommand(trimmed) ||
     isThemeCommand(trimmed) ||
+    isHelpCommand(trimmed) ||
     isSignOutCommand(trimmed) ||
     isApiKeysCommand(trimmed) ||
     isAiCommand(trimmed) ||
@@ -2773,14 +2937,26 @@ filterQualifierWrapEl?.addEventListener('focusout', (e) => {
   closeFilterQualifierMenu();
 });
 
+document.addEventListener('click', (e) => {
+  if (authMenuWrapEl?.contains(e.target)) return;
+  closeAuthMenu();
+});
+
+authMenuWrapEl?.addEventListener('focusout', (e) => {
+  const next = e.relatedTarget;
+  if (next instanceof Node && authMenuWrapEl.contains(next)) return;
+  closeAuthMenu();
+});
+
 function updateAuthUi(status) {
   currentAuthState = {
     loggedIn: Boolean(status?.loggedIn),
     login: status?.login ?? null,
     avatarUrl: status?.avatarUrl ?? null,
   };
+  updateAuthMenu();
   if (status?.loggedIn) {
-    btnAuth.title = status.login ? `Sign out (${status.login})` : 'Sign out';
+    btnAuth.title = status.login ? `GitHub account menu (${status.login})` : 'GitHub account menu';
     btnAuth.setAttribute('aria-label', btnAuth.title);
     if (status.avatarUrl) {
       userAvatarEl.src = status.avatarUrl;
@@ -2799,20 +2975,39 @@ function updateAuthUi(status) {
     userAvatarEl.classList.add('hidden');
     userAvatarEl.alt = '';
     userAvatarPlaceholderEl.textContent = '?';
-    btnAuth.title = 'Sign in with GitHub';
-    btnAuth.setAttribute('aria-label', 'Sign in with GitHub');
+    btnAuth.title = 'GitHub account menu';
+    btnAuth.setAttribute('aria-label', 'GitHub account menu');
   }
   if (items.length > 0) {
     renderResults();
   }
 }
 
-btnAuth.addEventListener('click', async () => {
-  const status = await api().authStatus();
+btnAuth.addEventListener('click', () => {
+  if (isAuthMenuOpen()) {
+    closeAuthMenu();
+    return;
+  }
+  openAuthMenu();
+});
+
+btnAuth.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    openAuthMenu();
+  } else if (e.key === 'Escape' && isAuthMenuOpen()) {
+    e.preventDefault();
+    closeAuthMenu({ restoreFocus: true });
+  }
+});
+
+authMenuActionEl?.addEventListener('click', async () => {
   setHint('');
+  closeAuthMenu();
   try {
-    if (status.loggedIn) {
+    if (currentAuthState.loggedIn) {
       await api().logout();
+      setHint('Signed out of GitHub', { muted: true });
     } else {
       await api().login();
     }
@@ -2821,11 +3016,20 @@ btnAuth.addEventListener('click', async () => {
   }
 });
 
+authMenuActionEl?.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeAuthMenu({ restoreFocus: true });
+  }
+});
+
 searchInput.addEventListener('input', scheduleSearch);
 
 function handleEscapeKey() {
   if (isApiKeyDialogOpen()) {
     closeApiKeyDialog();
+  } else if (isAuthMenuOpen()) {
+    closeAuthMenu({ restoreFocus: true });
   } else if (isFilterQualifierMenuOpen()) {
     closeFilterQualifierMenu({ restoreFocus: true });
   } else if (repoBrowseState?.step === 'list') {

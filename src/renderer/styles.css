@@ -645,6 +645,7 @@ body {
   justify-content: flex-end;
   align-items: center;
   margin-left: auto;
+  position: relative;
 }
 
 /* Hint + results below the text-box; horizontal inset matches .text-box margin */
@@ -934,4 +935,46 @@ body {
 
 .profile-button .user-avatar:not(.hidden) ~ .user-avatar-placeholder {
   display: none;
+}
+
+.auth-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--cp-border);
+  border-radius: 10px;
+  background: var(--cp-shell-bg);
+  box-shadow: 0 12px 28px var(--cp-menu-shadow);
+  -webkit-app-region: no-drag;
+}
+
+.auth-menu-status {
+  padding: 8px 9px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--cp-muted);
+}
+
+.auth-menu-action {
+  width: 100%;
+  padding: 8px 9px;
+  margin: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cp-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.auth-menu-action:hover,
+.auth-menu-action:focus-visible {
+  outline: none;
+  background: var(--cp-surface-hover);
 }

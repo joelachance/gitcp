@@ -63,10 +63,23 @@
               <div id="filter-pills" class="filter-pills" aria-label="Active search filters"></div>
             </div>
             <div class="text-box-profile">
-              <button type="button" id="btn-auth" class="profile-button">
+              <button
+                type="button"
+                id="btn-auth"
+                class="profile-button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-controls="auth-menu"
+              >
                 <img id="user-avatar" class="user-avatar hidden" alt="" width="32" height="32" />
                 <span id="user-avatar-placeholder" class="user-avatar-placeholder">?</span>
               </button>
+              <div id="auth-menu" class="auth-menu hidden" role="menu" aria-hidden="true">
+                <div id="auth-menu-status" class="auth-menu-status" role="presentation"></div>
+                <button type="button" id="auth-menu-action" class="auth-menu-action" role="menuitem">
+                  Sign in with GitHub
+                </button>
+              </div>
             </div>
           </div>
         </div>
