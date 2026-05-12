@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('gitcp', {
     }),
   listAccessibleIssues: (options) => ipcRenderer.invoke('gitcp:list-accessible-issues', options),
   listReposWithCi: () => ipcRenderer.invoke('gitcp:list-repos-ci'),
+  homeActivity: () => ipcRenderer.invoke('gitcp:home-activity'),
   listAccessibleOrgs: () => ipcRenderer.invoke('gitcp:list-accessible-orgs'),
   repoView: (payload) => ipcRenderer.invoke('gitcp:repo-view', payload ?? {}),
   copyText: (text) => ipcRenderer.invoke('gitcp:copy-text', { text }),

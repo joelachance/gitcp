@@ -549,3 +549,138 @@ export async function listReposWithCi(token) {
   });
   return { items: mapped.filter((x) => x != null) };
 }
+
+/**
+ * @param {string} url
+ * @param {string} token
+ */
+async function safeGhGet(url, token) {
+  const res = await fetch(url, { headers: authHeaders(token) });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return null;
+  return data;
+}
+
+/**
+ * @param {string | null | undefined} type
+ * @param {string | null | undefined} action
+ */
+function humanizeEventTitle(type, action) {
+  const base = String(type || 'Event').replace(/Event$/, '');
+  const spaced = base.replace(/([a-z])([A-Z])/g, '$1 $2');
+  if (!action) return spaced;
+  return `${spaced} · ${action}`;
+}
+
+const HOME_ACTIVITY_MAX_REPOS = 6;
+const HOME_ACTIVITY_MAX_FAILED_RUNS = 3;
+const HOME_ACTIVITY_MAX_COMMITS = 3;
+const HOME_ACTIVITY_MAX_EVENTS = 4;
+
+/**
+ * Aggregated home feed from recently pushed repos the user can access.
+ * Failed CI runs are surfaced first, then recent commits, then recent activity.
+ *
+ * @param {string} token
+ */
+export async function listHomeActivity(token) {
+  const repos = await listUserReposPaginated(token, { maxRepos: HOME_ACTIVITY_MAX_REPOS });
+  const repoBlocks = await mapWithConcurrency(repos, 4, async (repo) => {
+    const fullName = typeof repo.full_name === 'string' ? repo.full_name : '';
+    const idx = fullName.indexOf('/');
+    if (idx <= 0) return { failed: [], commits: [], events: [] };
+    const owner = fullName.slice(0, idx);
+    const name = fullName.slice(idx + 1);
+    const baseUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+    const [runsData, commitsData, eventsData] = await Promise.all([
+      safeGhGet(`${baseUrl}/actions/runs?per_page=4`, token),
+      safeGhGet(`${baseUrl}/commits?per_page=1`, token),
+      safeGhGet(`${baseUrl}/events?per_page=1`, token),
+    ]);
+
+    const failed = Array.isArray(runsData?.workflow_runs)
+      ? runsData.workflow_runs
+          .filter((run) => run?.conclusion === 'failure')
+          .map((run) => ({
+            sortAt: run.created_at || '',
+            item: {
+              title: run.name || 'Workflow run',
+              subtitle: ['Failed CI', fullName, run.head_branch, shortDate(run.created_at)]
+                .filter(Boolean)
+                .join(' · '),
+              html_url: run.html_url || `https://github.com/${fullName}/actions`,
+              rowKind: 'ci',
+              repoFullName: fullName,
+              runId: run.id,
+              runStatus: run.status || '',
+              runConclusion: run.conclusion || '',
+            },
+          }))
+      : [];
+
+    const commits = Array.isArray(commitsData)
+      ? commitsData.slice(0, 1).map((commit) => {
+          const msg = /** @type {any} */ (commit.commit)?.message;
+          const first = typeof msg === 'string' ? msg.split('\n')[0].trim() : 'Commit';
+          const who =
+            /** @type {any} */ (commit.commit)?.author?.name ||
+            /** @type {any} */ (commit.author)?.login ||
+            '';
+          const at =
+            /** @type {any} */ (commit.commit)?.author?.date ||
+            /** @type {any} */ (commit.commit)?.committer?.date ||
+            '';
+          return {
+            sortAt: at,
+            item: {
+              title: first || 'Commit',
+              subtitle: ['Commit', fullName, who, shortDate(at)].filter(Boolean).join(' · '),
+              html_url: commit.html_url || `https://github.com/${fullName}/commits`,
+              rowKind: 'commit',
+            },
+          };
+        })
+      : [];
+
+    const events = Array.isArray(eventsData)
+      ? eventsData.slice(0, 1).map((event) => {
+          const actor = /** @type {any} */ (event.actor)?.login || '';
+          const action = /** @type {any} */ (event.payload)?.action || '';
+          const at = event.created_at || '';
+          return {
+            sortAt: at,
+            item: {
+              title: [humanizeEventTitle(event.type, action), actor].filter(Boolean).join(' · '),
+              subtitle: ['Activity', fullName, shortDate(at)].filter(Boolean).join(' · '),
+              html_url: eventToUrl(event, fullName) || `https://github.com/${fullName}`,
+              rowKind: 'activity',
+            },
+          };
+        })
+      : [];
+
+    return { failed, commits, events };
+  });
+
+  const sortDesc = (a, b) => new Date(b.sortAt || 0).getTime() - new Date(a.sortAt || 0).getTime();
+  const failed = repoBlocks
+    .flatMap((block) => block.failed)
+    .sort(sortDesc)
+    .slice(0, HOME_ACTIVITY_MAX_FAILED_RUNS)
+    .map((entry) => entry.item);
+  const commits = repoBlocks
+    .flatMap((block) => block.commits)
+    .sort(sortDesc)
+    .slice(0, HOME_ACTIVITY_MAX_COMMITS)
+    .map((entry) => entry.item);
+  const events = repoBlocks
+    .flatMap((block) => block.events)
+    .sort(sortDesc)
+    .slice(0, HOME_ACTIVITY_MAX_EVENTS)
+    .map((entry) => entry.item);
+
+  return {
+    items: [...failed, ...commits, ...events],
+    scannedRepos: repos.length,
+  };
+}

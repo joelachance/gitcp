@@ -27,6 +27,7 @@ import {
   findAccessibleRepoWithActions,
   isCiActionsEndpointBlocked,
   listAccessibleOrgs,
+  listHomeActivity,
   listReposWithCi,
   parseOwnerRepo,
 } from './github-repo.js';
@@ -601,7 +602,7 @@ async function getRepoViewData(kind, fullName, options = {}) {
   const k = typeof kind === 'string' ? kind.toLowerCase() : '';
   if (!REPO_VIEW_KINDS.has(k)) {
     throw new Error(
-      'Unknown repository command. Use /repo, /releases, /ci, /tags, /branches, /commits, or /activity followed by owner/repo.',
+      'Unknown repository command. Use /releases, /ci, /tags, /branches, /commits, or /activity followed by owner/repo, or open repository summary from /repos.',
     );
   }
   const token = loadToken()?.access_token;
@@ -662,6 +663,14 @@ function setupIpc() {
       throw new Error('Sign in with GitHub to list repositories.');
     }
     return listReposWithCi(token);
+  });
+
+  ipcMain.handle('gitcp:home-activity', async () => {
+    const token = loadToken()?.access_token;
+    if (!token) {
+      throw new Error('Sign in with GitHub to load recent activity.');
+    }
+    return listHomeActivity(token);
   });
 
   ipcMain.handle('gitcp:list-accessible-orgs', async () => {
@@ -773,8 +782,7 @@ function setupIpc() {
     if (!token) {
       throw new Error('Sign in with GitHub to use AI.');
     }
-    const reply = await runAiChat(token, message);
-    return { reply };
+    return runAiChat(token, message);
   });
 }
 

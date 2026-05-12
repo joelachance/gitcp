@@ -11,10 +11,10 @@ const GITCP_THEMES = [
   { id: 'split', title: 'Split neon', subtitle: 'Cyan + magenta highlights' },
 ];
 
-const HOME_COMMANDS = ['/issues', '/pr', '/ai', '/ci'];
 const SEARCH_RESULT_CACHE_TTL_MS = 30_000;
+const HOME_ACTIVITY_CACHE_TTL_MS = 45_000;
 const HOME_EMPTY_HINT =
-  'Type to search GitHub issues and pull requests, press / for commands, or use + for repo/user/org filters.';
+  'Latest GitHub activity from your recent repos. Type to search, use /help for commands, or use + for repo/user/org filters.';
 
 const searchInput = document.getElementById('query');
 const resultsEl = document.getElementById('results');
@@ -48,7 +48,7 @@ let debounceTimer = null;
 /** Full list from GitHub when using `/issues`; reused while the query stays in that mode. */
 let issuesListCache = null;
 
-/** Full PR list when using `/pr` or `/prs` (open + closed); reused while the query stays in that mode. */
+/** Full PR list when using `/pr` (open + closed); reused while the query stays in that mode. */
 let prsListCache = null;
 
 /** Rows from `/repos` (repos + CI summary); reused while the query stays in that mode. */
@@ -60,7 +60,10 @@ let orgsListCache = null;
 /** Latest plain GitHub search snapshot; reused for exact re-open and incremental local previews. */
 let searchResultsCache = null;
 
-/** Latest slash repo view rows for `/repo`, `/ci`, `/branches`, etc. */
+/** Latest home activity snapshot for the empty-input dashboard. */
+let homeActivityCache = null;
+
+/** Latest slash repo view rows for `/ci`, `/branches`, etc. */
 let repoViewListCache = null;
 
 /**
@@ -228,6 +231,43 @@ function clearAiChatTranscript() {
   aiTranscript = [];
 }
 
+function trimExtractedUrl(rawUrl) {
+  let url = String(rawUrl || '').trim();
+  while (/[.,!?;:]$/.test(url)) {
+    url = url.slice(0, -1);
+  }
+  while (url.endsWith(')')) {
+    const opens = (url.match(/\(/g) || []).length;
+    const closes = (url.match(/\)/g) || []).length;
+    if (closes <= opens) break;
+    url = url.slice(0, -1);
+  }
+  return url;
+}
+
+function extractTextLinks(text) {
+  const matches = String(text || '').match(/https?:\/\/[^\s<>"']+/g) || [];
+  const seen = new Set();
+  const out = [];
+  for (const match of matches) {
+    const url = trimExtractedUrl(match);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
+function buildAiLinkTitle(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '';
+    return `Open ${parsed.hostname}${path}`;
+  } catch {
+    return `Open ${url}`;
+  }
+}
+
 function transcriptToItems() {
   /** @type {unknown[]} */
   const out = [];
@@ -236,6 +276,18 @@ function transcriptToItems() {
       out.push({ __aiUser: true, text: m.text });
     } else {
       out.push({ __aiResponse: true, text: m.text });
+      const links =
+        Array.isArray(m.links) && m.links.length
+          ? m.links.filter((url) => typeof url === 'string' && url.trim())
+          : extractTextLinks(m.text);
+      for (const url of links) {
+        out.push({
+          __aiLinkRow: true,
+          title: buildAiLinkTitle(url),
+          subtitle: 'Press Enter to open this link',
+          html_url: url,
+        });
+      }
     }
   }
   return out;
@@ -267,6 +319,7 @@ async function submitAiChatFromEnter() {
   setHint('Waiting for AI…', { muted: true });
   setLoading(true);
   renderResults();
+  scrollResultsToBottom();
   updateRefreshHint();
 
   const endLoading = () => {
@@ -285,6 +338,7 @@ async function submitAiChatFromEnter() {
       activeIndex = -1;
       setHint('Configure an API key to use /ai', { muted: true });
       renderResults();
+      scrollResultsToBottom();
       endLoading();
       updateRefreshHint();
       return true;
@@ -292,7 +346,10 @@ async function submitAiChatFromEnter() {
     const data = await api().aiChat(question);
     if (seq !== loadSeq) return true;
     const reply = typeof data?.reply === 'string' ? data.reply : '';
-    aiTranscript.push({ role: 'assistant', text: reply });
+    const links = Array.isArray(data?.links)
+      ? data.links.filter((url) => typeof url === 'string' && url.trim())
+      : [];
+    aiTranscript.push({ role: 'assistant', text: reply, links });
     items = transcriptToItems();
     activeIndex = -1;
     setHint(
@@ -300,6 +357,7 @@ async function submitAiChatFromEnter() {
       { muted: true },
     );
     renderResults();
+    scrollResultsToBottom();
   } catch (err) {
     if (seq !== loadSeq) return true;
     aiTranscript.push({
@@ -310,6 +368,7 @@ async function submitAiChatFromEnter() {
     activeIndex = -1;
     setHint(err?.message || 'AI request failed');
     renderResults();
+    scrollResultsToBottom();
   } finally {
     endLoading();
     updateRefreshHint();
@@ -365,8 +424,13 @@ function updateRefreshHint() {
   }
   const q = buildSearchQuery();
   if (!q) {
-    resultsRefreshHintEl.textContent = '';
-    resultsRefreshHintEl.classList.add('hidden');
+    if (!searchInput.value.trim() && searchFilters.length === 0 && aiTranscript.length === 0 && currentAuthState.loggedIn) {
+      resultsRefreshHintEl.textContent = `${refreshShortcutLabel()} to refresh activity`;
+      resultsRefreshHintEl.classList.remove('hidden');
+    } else {
+      resultsRefreshHintEl.textContent = '';
+      resultsRefreshHintEl.classList.add('hidden');
+    }
     updateWindowHeight();
     return;
   }
@@ -471,21 +535,46 @@ function canPreviewSearchResultsFromCache(query) {
   return next === prev || next.startsWith(prev);
 }
 
-function buildHomeItems() {
-  return HOME_COMMANDS.map((command) => {
-    const match = SLASH_COMMANDS.find((item) => item.command === command);
-    return {
-      __slashCommand: true,
-      command,
-      description: match?.description || '',
-    };
-  });
+function getFreshHomeActivityCache() {
+  if (!homeActivityCache) return null;
+  if (Date.now() - homeActivityCache.fetchedAt > HOME_ACTIVITY_CACHE_TTL_MS) return null;
+  return homeActivityCache;
 }
 
-function renderHomeState() {
-  items = buildHomeItems();
+function getStaleHomeActivityCache() {
+  return homeActivityCache;
+}
+
+function buildHomeStateItems(activityItems = []) {
+  return [...activityItems];
+}
+
+function homeHintText(activityCount, scannedRepos, { refreshing = false, signedIn = currentAuthState.loggedIn } = {}) {
+  if (!signedIn) {
+    return 'Sign in with GitHub to see recent CI failures, commits, and repo activity here.';
+  }
+  if (activityCount > 0) {
+    const suffix = refreshing ? ' · refreshing…' : '';
+    return `${activityCount} recent updates across ${scannedRepos} repo${scannedRepos === 1 ? '' : 's'}${suffix}`;
+  }
+  if (scannedRepos > 0) {
+    const suffix = refreshing ? ' · refreshing…' : '';
+    return `No recent activity surfaced across ${scannedRepos} repo${scannedRepos === 1 ? '' : 's'}${suffix}`;
+  }
+  return HOME_EMPTY_HINT;
+}
+
+function renderHomeState(activityItems = [], options = {}) {
+  const scannedRepos = Number.isInteger(options.scannedRepos) ? options.scannedRepos : 0;
+  const refreshing = options.refreshing === true;
+  const signedIn =
+    typeof options.signedIn === 'boolean' ? options.signedIn : currentAuthState.loggedIn;
+  items = buildHomeStateItems(activityItems);
   activeIndex = -1;
-  setHint(HOME_EMPTY_HINT, { muted: true });
+  if (items.length > 0) {
+    activeIndex = 0;
+  }
+  setHint(homeHintText(activityItems.length, scannedRepos, { refreshing, signedIn }), { muted: true });
   setLoading(false);
   renderResults();
   updateRefreshHint();
@@ -707,10 +796,6 @@ const SLASH_COMMANDS = [
     description: 'Pull requests (open & closed) in repos you can access',
   },
   {
-    command: '/prs',
-    description: 'Same as /pr',
-  },
-  {
     command: '/activity',
     description: 'Repository events — use /activity owner/repo or add a repo: badge',
   },
@@ -733,10 +818,6 @@ const SLASH_COMMANDS = [
   {
     command: '/orgs',
     description: 'Organizations your GitHub account can access, with an action to add an org: badge',
-  },
-  {
-    command: '/repo',
-    description: 'Repository summary — use /repo owner/repo or add a repo: badge',
   },
   {
     command: '/tags',
@@ -819,7 +900,6 @@ function activeRepoBadgeValue() {
 
 function isPrCommand(trimmed) {
   const lower = trimmed.toLowerCase();
-  if (lower === '/prs' || lower.startsWith('/prs ')) return true;
   if (lower === '/pr' || lower.startsWith('/pr ')) return true;
   return false;
 }
@@ -867,7 +947,7 @@ function buildHelpItems(trimmed, shortcutInfo) {
       __helpRow: true,
       title: 'Use repo badges with repo commands',
       description:
-        'A repo: badge can supply the repository for /ci, /repo, /branches, /commits, /releases, /tags, and /activity, so /ci works without retyping owner/repo.',
+        'A repo: badge can supply the repository for /ci, /branches, /commits, /releases, /tags, and /activity, so /ci works without retyping owner/repo.',
     },
     {
       __helpRow: true,
@@ -1121,8 +1201,6 @@ function initStoredTheme() {
 
 function prCommandFilterText(trimmed) {
   const lower = trimmed.toLowerCase();
-  if (lower.startsWith('/prs ')) return trimmed.slice(5).trim();
-  if (lower === '/prs') return '';
   if (lower.startsWith('/pr ')) return trimmed.slice(4).trim();
   if (lower === '/pr') return '';
   return '';
@@ -1133,7 +1211,7 @@ function prCommandFilterText(trimmed) {
  * @returns {{ kind: string, fullName: string, filterText: string } | null}
  */
 function parseRepoViewCommand(trimmed) {
-  const m = trimmed.match(/^\/(repo|releases|ci|tags|branches|commits|activity)(?:\s+(.*))?$/i);
+  const m = trimmed.match(/^\/(releases|ci|tags|branches|commits|activity)(?:\s+(.*))?$/i);
   if (!m) return null;
   const kind = m[1].toLowerCase();
   const rest = (m[2] || '').trim();
@@ -1163,7 +1241,7 @@ function parseRepoViewCommand(trimmed) {
  * @param {string} trimmed
  */
 function isRepoViewIncomplete(trimmed) {
-  const m = trimmed.match(/^\/(repo|releases|ci|tags|branches|commits|activity)(?:\s+(.*))?$/i);
+  const m = trimmed.match(/^\/(releases|ci|tags|branches|commits|activity)(?:\s+(.*))?$/i);
   if (!m) return false;
   const rest = (m[2] || '').trim();
   const repoBadge = activeRepoBadgeValue();
@@ -1607,7 +1685,7 @@ function applyIssueReopenedLocally(fullName, num) {
 }
 
 function mutateMatchingWorkflowRows(fullName, runId, mutate) {
-  const lists = [items, repoViewListCache?.rows];
+  const lists = [items, repoViewListCache?.rows, homeActivityCache?.items];
   for (const list of lists) {
     if (!Array.isArray(list)) continue;
     for (const item of list) {
@@ -1846,6 +1924,13 @@ function moveActiveResult(delta, { preserveActionFocus = false } = {}) {
   }
 }
 
+function scrollResultsToBottom() {
+  if (!resultsEl) return;
+  requestAnimationFrame(() => {
+    resultsEl.scrollTop = resultsEl.scrollHeight;
+  });
+}
+
 function updateWindowHeight() {
   requestAnimationFrame(() => {
     if (!appEl.classList.contains('hidden')) {
@@ -1901,6 +1986,33 @@ function renderResults() {
       pre.textContent = typeof item.text === 'string' ? item.text : '';
       li.appendChild(pre);
       li.setAttribute('aria-label', 'AI reply');
+      resultsEl.appendChild(li);
+      return;
+    }
+
+    if (item.__aiLinkRow) {
+      const iconWrap = resultIcon('result-icon--rv-link', Svg.link);
+      iconWrap.title = 'Link';
+      const main = document.createElement('div');
+      main.className = 'result-main';
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = item.title;
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = item.subtitle;
+      main.appendChild(title);
+      main.appendChild(meta);
+      row.appendChild(iconWrap);
+      row.appendChild(main);
+      li.appendChild(row);
+      li.setAttribute('aria-label', `${item.title}: ${item.subtitle}`);
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        activeIndex = i;
+        renderResults();
+        void openSelected();
+      });
       resultsEl.appendChild(li);
       return;
     }
@@ -2217,6 +2329,11 @@ async function openSelected() {
   if (row?.__aiUser || row?.__aiPending || row?.__aiResponse) {
     return;
   }
+  if (row?.__aiLinkRow) {
+    if (!row.html_url) return;
+    await api().openExternal(row.html_url);
+    return;
+  }
   if (row?.__themeOption) {
     applyTheme(row.themeId);
     searchInput.value = '';
@@ -2432,7 +2549,59 @@ async function runSearch(options = {}) {
       updateRefreshHint();
       return;
     }
-    renderHomeState();
+    if (!currentAuthState.loggedIn) {
+      renderHomeState([], { signedIn: false });
+      return;
+    }
+    const freshHomeCache = !forceSearchRefresh ? getFreshHomeActivityCache() : null;
+    if (freshHomeCache) {
+      renderHomeState(freshHomeCache.items, { scannedRepos: freshHomeCache.scannedRepos });
+      return;
+    }
+    const staleHomeCache = getStaleHomeActivityCache();
+    if (staleHomeCache) {
+      renderHomeState(staleHomeCache.items, {
+        scannedRepos: staleHomeCache.scannedRepos,
+        refreshing: true,
+      });
+    } else {
+      renderHomeState([], { signedIn: true, refreshing: forceSearchRefresh });
+    }
+    setLoading(true);
+    try {
+      const data = await api().homeActivity();
+      if (seq !== loadSeq) return;
+      homeActivityCache = {
+        items: (data.items ?? []).map((item) => ({
+          ...item,
+          __repoView: true,
+        })),
+        scannedRepos: Number.isInteger(data.scannedRepos) ? data.scannedRepos : 0,
+        fetchedAt: Date.now(),
+      };
+      renderHomeState(homeActivityCache.items, {
+        scannedRepos: homeActivityCache.scannedRepos,
+      });
+    } catch (err) {
+      if (seq !== loadSeq) return;
+      if (staleHomeCache) {
+        items = buildHomeStateItems(staleHomeCache.items);
+        activeIndex = items.length ? 0 : -1;
+        setHint(
+          `${homeHintText(staleHomeCache.items.length, staleHomeCache.scannedRepos, {
+            signedIn: true,
+          })} · refresh failed`,
+          { muted: true },
+        );
+        renderResults();
+      } else {
+        renderHomeState([], { signedIn: true });
+        setHint(err?.message || 'Could not load recent activity');
+      }
+    } finally {
+      endLoading();
+      updateRefreshHint();
+    }
     return;
   }
 
@@ -3002,7 +3171,11 @@ function scheduleSearch() {
   const t = searchInput.value.trimStart();
   const trimmed = searchInput.value.trim();
   if (!previewPlainSearchFromCache() && !trimmed && searchFilters.length === 0 && aiTranscript.length === 0) {
-    renderHomeState();
+    const freshHomeCache = getFreshHomeActivityCache();
+    renderHomeState(freshHomeCache?.items ?? [], {
+      scannedRepos: freshHomeCache?.scannedRepos ?? 0,
+      signedIn: currentAuthState.loggedIn,
+    });
   }
   const instantIssues =
     t === '/issues' ||
@@ -3321,7 +3494,8 @@ document.addEventListener('keydown', (e) => {
     !parseRepoViewCommand(line) &&
     !isReposCommand(line) &&
     !(isAiCommand(line) && aiUserQuestion(line)) &&
-    !buildSearchQuery().trim()
+    !buildSearchQuery().trim() &&
+    !(line === '' && searchFilters.length === 0 && aiTranscript.length === 0 && currentAuthState.loggedIn)
   )
     return;
   e.preventDefault();
@@ -3381,7 +3555,11 @@ function bootstrap() {
      * resolved, so the palette was completely invisible if IPC was slow or never settled. */
     appEl.classList.remove('hidden');
 
-    window.gitcp.onAuthChanged((state) => updateAuthUi(state));
+    window.gitcp.onAuthChanged((state) => {
+      homeActivityCache = null;
+      updateAuthUi(state);
+      scheduleSearch();
+    });
 
     window.gitcp.onFocusSearch(() => {
       focusSearchInput({ select: true });
