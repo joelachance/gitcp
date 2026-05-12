@@ -35,7 +35,7 @@ export function getAiConfig() {
   };
 }
 
-const SYSTEM_PROMPT = `You are GitCP's assistant. You receive live summaries from the GitHub REST API: open issues/PRs, repositories the user can access, and GitHub Actions workflow runs when relevant.
+const SYSTEM_PROMPT = `You are GitCP's assistant. You receive live summaries from the GitHub REST API: open issues/PRs, repositories (each line may include GitHub’s short **description** field), and—when the user names **owner/repo**—the repo **README** (default branch) and **GitHub Actions** runs when available.
 
 **Naming a repository:** Per-repo data is loaded when **owner/repo** appears in the user’s message (e.g. \`myorg/my-repo\`). The snapshot may include a line **“Repository inferred from the user question”** — if that line is present, the user **already** named the repo; **never** tell them to “ask again with owner/repo” or imply they forgot it.
 
@@ -43,7 +43,48 @@ If there is **no** inferred repository line and they ask about CI for “my app�
 
 If **owner/repo** was inferred but Actions data is missing or shows no failures, explain **that** (API error text in context, no workflows, permissions, or no failed runs in the returned batch) — do not default to “add the repo name”.
 
-Answer clearly and concisely. Reference repositories as owner/repo and cite issue/PR numbers when relevant. Use workflow run lines from the context (status, conclusion, branch, URL) — do not invent outcomes.`;
+Answer clearly and concisely. Reference repositories as owner/repo and cite issue/PR numbers when relevant. Use workflow run lines from the context (status, conclusion, branch, URL) — do not invent outcomes. When the context includes a GitHub URL that supports your answer, include the full https URL in plain text. Do not replace it with only a hash, only a run number, or only markdown link text.`;
+
+function trimSnapshotUrl(rawUrl) {
+  let url = String(rawUrl || '').trim();
+  while (/[.,!?;:]$/.test(url)) {
+    url = url.slice(0, -1);
+  }
+  while (url.endsWith(')')) {
+    const opens = (url.match(/\(/g) || []).length;
+    const closes = (url.match(/\)/g) || []).length;
+    if (closes <= opens) break;
+    url = url.slice(0, -1);
+  }
+  return url;
+}
+
+/**
+ * Return trusted GitHub URLs copied directly from the GitHub snapshot. These are used for renderer
+ * link rows so we don't depend on the model reproducing URLs perfectly.
+ *
+ * @param {string} contextBlock
+ * @param {string} userMessage
+ */
+function extractTrustedReplyLinks(contextBlock, userMessage) {
+  const matches = String(contextBlock || '').match(/https:\/\/github\.com\/[^\s<>"']+/g) || [];
+  const seen = new Set();
+  const urls = [];
+  for (const match of matches) {
+    const url = trimSnapshotUrl(match);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  if (urls.length === 0) return [];
+
+  const prefersActions =
+    /\b(ci|workflow|actions|failed run|deployment|pipeline|build)\b/i.test(userMessage);
+  const actionsUrls = urls.filter((url) => /\/actions\/runs\/\d+/i.test(url));
+  const nonActionsUrls = urls.filter((url) => !/\/actions\/runs\/\d+/i.test(url));
+  const ordered = prefersActions ? [...actionsUrls, ...nonActionsUrls] : urls;
+  return ordered.slice(0, 3);
+}
 
 /**
  * @param {string} apiKey
@@ -140,6 +181,7 @@ export async function runAiChat(githubToken, userMessage) {
   }
 
   const contextBlock = await buildGithubContextBlock(githubToken, userMessage);
+  const trustedLinks = extractTrustedReplyLinks(contextBlock, userMessage);
   const userPayload = `GitHub data snapshot:\n\n${contextBlock}\n\n---\n\nUser question:\n${userMessage}`;
 
   const messages = [
@@ -148,7 +190,9 @@ export async function runAiChat(githubToken, userMessage) {
   ];
 
   if (cfg.provider === 'openai') {
-    return callOpenAI(cfg.openaiKey, cfg.openaiModel, messages);
+    const reply = await callOpenAI(cfg.openaiKey, cfg.openaiModel, messages);
+    return { reply, links: trustedLinks };
   }
-  return callAnthropic(cfg.anthropicKey, cfg.anthropicModel, messages);
+  const reply = await callAnthropic(cfg.anthropicKey, cfg.anthropicModel, messages);
+  return { reply, links: trustedLinks };
 }

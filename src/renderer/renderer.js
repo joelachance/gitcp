@@ -3,8 +3,8 @@ import { resultIcon, Svg } from './icons.js';
 const THEME_STORAGE_KEY = 'gitcp.theme';
 
 const GITCP_THEMES = [
-  { id: 'github', title: 'GitHub dark', subtitle: 'Blue accents (default)' },
-  { id: 'paper', title: 'GitHub light', subtitle: 'Soft paper whites with GitHub blue' },
+  { id: 'github', title: 'Monochrome', subtitle: 'Black, white, and graphite (default)' },
+  { id: 'paper', title: 'Paper', subtitle: 'Soft whites with graphite ink' },
   { id: 'arctic', title: 'Arctic glass', subtitle: 'Icy cyan on cool slate' },
   { id: 'plum', title: 'Plum HUD', subtitle: 'Electric magenta on purple gray' },
   { id: 'rose', title: 'Rose voltage', subtitle: 'Warm magenta-rose' },
@@ -411,13 +411,13 @@ function updateRefreshHint() {
     return;
   }
   if (parseRepoViewCommand(trimmed)) {
-    resultsRefreshHintEl.textContent = `${refreshShortcutLabel()} to refresh`;
+    resultsRefreshHintEl.textContent = `j/k to navigate · ${refreshShortcutLabel()} to refresh`;
     resultsRefreshHintEl.classList.remove('hidden');
     updateWindowHeight();
     return;
   }
   if (isReposCommand(trimmed)) {
-    resultsRefreshHintEl.textContent = `${refreshShortcutLabel()} to refresh`;
+    resultsRefreshHintEl.textContent = `j/k to navigate · ${refreshShortcutLabel()} to refresh`;
     resultsRefreshHintEl.classList.remove('hidden');
     updateWindowHeight();
     return;
@@ -425,7 +425,7 @@ function updateRefreshHint() {
   const q = buildSearchQuery();
   if (!q) {
     if (!searchInput.value.trim() && searchFilters.length === 0 && aiTranscript.length === 0 && currentAuthState.loggedIn) {
-      resultsRefreshHintEl.textContent = `${refreshShortcutLabel()} to refresh activity`;
+      resultsRefreshHintEl.textContent = `j/k to navigate · ${refreshShortcutLabel()} to refresh activity`;
       resultsRefreshHintEl.classList.remove('hidden');
     } else {
       resultsRefreshHintEl.textContent = '';
@@ -434,7 +434,7 @@ function updateRefreshHint() {
     updateWindowHeight();
     return;
   }
-  resultsRefreshHintEl.textContent = `${refreshShortcutLabel()} to refresh results`;
+  resultsRefreshHintEl.textContent = `j/k to navigate · ${refreshShortcutLabel()} to refresh results`;
   resultsRefreshHintEl.classList.remove('hidden');
   updateWindowHeight();
 }

@@ -6,37 +6,41 @@
 
 /* --- Themes (set `data-theme` on `<html>`; default + cyan/magenta variants) --- */
 html[data-theme='github'] {
-  --cp-text: #e6edf3;
-  --cp-muted: #8b949e;
-  --cp-shell-bg: #161b22;
-  --cp-field-bg: #0d1117;
-  --cp-border: rgba(139, 148, 158, 0.22);
-  --cp-accent: #58a6ff;
-  --cp-focus-ring: rgba(88, 166, 255, 0.22);
-  --cp-surface-elevated: #21262d;
-  --cp-surface-hover: #21262d;
-  --cp-row-divider: #21262d;
-  --cp-link: #58a6ff;
+  --cp-text: #f2f4f5;
+  --cp-muted: #7a8088;
+  --cp-shell-bg: #0c0d0f;
+  --cp-field-bg: #050607;
+  --cp-border: rgba(72, 76, 82, 0.78);
+  --cp-shell-border: #111317;
+  --cp-field-border: #060708;
+  --cp-accent: #d8dde2;
+  --cp-accent-contrast: #050607;
+  --cp-focus-ring: rgba(255, 255, 255, 0.12);
+  --cp-surface-elevated: #111317;
+  --cp-surface-hover: #17191d;
+  --cp-row-divider: #17191d;
+  --cp-link: #d9dde2;
+  --cp-title: #f2f4f5;
   --cp-hint-error: #f85149;
   --cp-dismiss-hover-bg: rgba(240, 246, 252, 0.08);
   --cp-menu-shadow: rgba(0, 0, 0, 0.45);
-  --cp-filter-repo-fg: #58a6ff;
-  --cp-filter-repo-border: rgba(88, 166, 255, 0.35);
-  --cp-filter-repo-bg: rgba(88, 166, 255, 0.08);
-  --cp-filter-user-fg: #3fb950;
-  --cp-filter-user-border: rgba(63, 185, 80, 0.35);
-  --cp-filter-user-bg: rgba(63, 185, 80, 0.08);
-  --cp-filter-org-fg: #d29922;
-  --cp-filter-org-border: rgba(210, 153, 34, 0.35);
-  --cp-filter-org-bg: rgba(210, 153, 34, 0.1);
-  --cp-spinner-track: #30363d;
-  --cp-spinner-head: #8b949e;
-  --cp-status-open: #1a7f37;
-  --cp-status-closed-issue: #8250df;
-  --cp-status-draft: #6e7681;
-  --cp-status-merged: #8250df;
-  --cp-status-closed-pr: #cf222e;
-  --cp-ai-response: #67e8f9;
+  --cp-filter-repo-fg: #d7dbe0;
+  --cp-filter-repo-border: rgba(255, 255, 255, 0.14);
+  --cp-filter-repo-bg: rgba(255, 255, 255, 0.04);
+  --cp-filter-user-fg: #c7ccd2;
+  --cp-filter-user-border: rgba(255, 255, 255, 0.12);
+  --cp-filter-user-bg: rgba(255, 255, 255, 0.035);
+  --cp-filter-org-fg: #b6bcc4;
+  --cp-filter-org-border: rgba(255, 255, 255, 0.1);
+  --cp-filter-org-bg: rgba(255, 255, 255, 0.03);
+  --cp-spinner-track: #23262a;
+  --cp-spinner-head: #8c949d;
+  --cp-status-open: #d6dbe0;
+  --cp-status-closed-issue: #8c929b;
+  --cp-status-draft: #70767e;
+  --cp-status-merged: #b7bcc4;
+  --cp-status-closed-pr: #989ea7;
+  --cp-ai-response: #d8dde2;
 }
 
 html[data-theme='paper'] {
@@ -46,11 +50,13 @@ html[data-theme='paper'] {
   --cp-field-bg: #ffffff;
   --cp-border: rgba(31, 35, 40, 0.12);
   --cp-accent: #0969da;
+  --cp-accent-contrast: #ffffff;
   --cp-focus-ring: rgba(9, 105, 218, 0.18);
   --cp-surface-elevated: #ffffff;
   --cp-surface-hover: #e1e8f0;
   --cp-row-divider: #d8dee4;
   --cp-link: #0969da;
+  --cp-title: #1f2328;
   --cp-hint-error: #cf222e;
   --cp-dismiss-hover-bg: rgba(31, 35, 40, 0.06);
   --cp-menu-shadow: rgba(31, 35, 40, 0.16);
@@ -333,7 +339,7 @@ body {
 .api-key-dialog-button--primary {
   border-color: var(--cp-accent);
   background: var(--cp-accent);
-  color: #fff;
+  color: var(--cp-accent-contrast, #fff);
 }
 
 .api-key-dialog-button--primary:hover {
@@ -347,7 +353,7 @@ body {
   flex: 0 1 auto;
   width: 100%;
   border-radius: 16px;
-  border: 1px solid var(--cp-border);
+  border: 1px solid var(--cp-shell-border, var(--cp-border));
   background: var(--cp-shell-bg);
   -webkit-app-region: drag;
   app-region: drag;
@@ -372,7 +378,7 @@ body {
   display: flex;
   flex-direction: column;
   border-radius: 10px;
-  border: 1px solid var(--cp-border);
+  border: 1px solid var(--cp-field-border, var(--cp-border));
   background: var(--cp-field-bg);
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -881,7 +887,7 @@ body {
 }
 
 .results .title {
-  color: var(--cp-link);
+  color: var(--cp-title, var(--cp-link));
   font-weight: 500;
 }
 

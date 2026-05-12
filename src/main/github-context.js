@@ -98,9 +98,14 @@ export async function fetchRecentReposDigest(token, opts = {}) {
   const lines = repos.map((r) => {
     const fn = typeof r.full_name === 'string' ? r.full_name : '';
     const pushed = r.pushed_at ? String(r.pushed_at).slice(0, 10) : '';
+    const desc =
+      r.description && typeof r.description === 'string'
+        ? String(r.description).replace(/\s+/g, ' ').slice(0, 120)
+        : '';
     const lang = r.language ? String(r.language) : '';
     const branch = r.default_branch ? String(r.default_branch) : '';
-    return `${fn} · pushed ${pushed}${lang ? ` · ${lang}` : ''}${branch ? ` · default ${branch}` : ''}`;
+    const descPart = desc ? ` · ${desc}` : '';
+    return `${fn}${descPart} · pushed ${pushed}${lang ? ` · ${lang}` : ''}${branch ? ` · default ${branch}` : ''}`;
   });
   const header = `Total: ${repos.length} repositories (complete list from GET /user/repos; sorted by last push, newest first)`;
   return `${header}\n\n${lines.join('\n')}`;
@@ -129,6 +134,43 @@ export function inferOwnerRepoFromText(text) {
  * @param {string} token
  * @param {string} fullName owner/repo
  */
+const README_MAX_CHARS = 12_000;
+
+/**
+ * Default-branch README body (GitHub picks README.md / README.rst / etc.).
+ * @param {string} token
+ * @param {string} fullName owner/repo
+ */
+export async function fetchReadmeDigest(token, fullName) {
+  const pair = parseOwnerRepo(fullName);
+  if (!pair) return '';
+  const enc = (s) => encodeURIComponent(s);
+  const url = `https://api.github.com/repos/${enc(pair.owner)}/${enc(pair.repo)}/readme`;
+  const res = await fetch(url, {
+    headers: {
+      ...authHeaders(token),
+      Accept: 'application/vnd.github.raw',
+    },
+  });
+  if (res.status === 404) {
+    return '(No README at repository root, or not accessible with your token.)';
+  }
+  if (!res.ok) {
+    const snippet = (await res.text().catch(() => '')).slice(0, 160);
+    return `(README request failed: HTTP ${res.status}${snippet ? ` — ${snippet}` : ''})`;
+  }
+  const raw = await res.text();
+  const origLen = raw.length;
+  let text = raw.trim();
+  if (!text) {
+    return '(README file is empty.)';
+  }
+  if (text.length > README_MAX_CHARS) {
+    text = `${text.slice(0, README_MAX_CHARS)}\n\n… (truncated; full README was ${origLen} characters)`;
+  }
+  return text;
+}
+
 export async function fetchCiRunsDigest(token, fullName) {
   const pair = parseOwnerRepo(fullName);
   if (!pair) return '';
@@ -281,9 +323,15 @@ export async function buildGithubContextBlock(token, userQuestion) {
   if (focusRepo) {
     parts.push('');
     parts.push(
-      `**Repository inferred from the user question:** \`${focusRepo}\` — GitHub Actions below are for this repo only.`,
+      `**Repository inferred from the user question:** \`${focusRepo}\` — README and Actions below are for this repo only.`,
     );
-    const ci = await fetchCiRunsDigest(token, focusRepo);
+    const [readme, ci] = await Promise.all([
+      fetchReadmeDigest(token, focusRepo),
+      fetchCiRunsDigest(token, focusRepo),
+    ]);
+    parts.push('');
+    parts.push(`## README for ${focusRepo} (repository root; default branch)`);
+    parts.push(readme || '(unavailable)');
     parts.push('');
     parts.push(`## GitHub Actions workflow runs for ${focusRepo} (recent)`);
     parts.push(ci || '(no runs or unavailable)');
@@ -306,7 +354,7 @@ export async function buildGithubContextBlock(token, userQuestion) {
     parts.push(
       [
         'Some GitHub data is **per repository** and is only loaded when the user names **`owner/repo`** (e.g. `acme/payments-api`) in their question.',
-        '**With `owner/repo` in the prompt:** the snapshot can include **Actions/CI runs** for that repository (see sections above when present).',
+        '**With `owner/repo` in the prompt:** the snapshot can include the **README** (project overview) and **Actions/CI runs** for that repository (see sections above when present).',
         '**Without `owner/repo`:** only account-wide lists appear, plus an optional CI scan across recently pushed repos.',
         'If the question clearly needs one repo but no `owner/repo` appears anywhere in the user message, suggest they ask again and include it.',
       ].join(' '),
