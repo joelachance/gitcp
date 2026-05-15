@@ -41,7 +41,7 @@ import {
 } from './llm-keys.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MENU_ICON_PATH = path.join(__dirname, 'assets/GitHubTemplate.png');
+const MENU_ICON_PATH = path.join(__dirname, 'assets/GitTemplate.png');
 
 /** Preload must be CommonJS — ESM preload paths often fail to load with sandbox and leave `window.gitfinder` undefined. */
 function getPreloadPath() {

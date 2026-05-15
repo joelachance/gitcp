@@ -1,6 +1,7 @@
 const DEFAULT_SOURCE = 'gitfinder';
 const DEFAULT_VERSION = '0.1.0';
 const DEFAULT_INGEST_URL = 'https://satori-collect-emails.vercel.app/v1/ingest';
+const DEFAULT_PUBLIC_INGEST_KEY = 'satori-eng-co-random-token-808';
 
 function firstListValue(value) {
   return value
@@ -22,7 +23,8 @@ export function getEmailIngestConfig(env = process.env) {
     env.GITFINDER_INGEST_API_KEY?.trim() ||
     env.GITCP_INGEST_API_KEY?.trim() ||
     env.INGEST_API_KEY?.trim() ||
-    firstListValue(env.INGEST_API_KEYS);
+    firstListValue(env.INGEST_API_KEYS) ||
+    DEFAULT_PUBLIC_INGEST_KEY;
 
   if (!url || !apiKey) return null;
   return { url, apiKey };

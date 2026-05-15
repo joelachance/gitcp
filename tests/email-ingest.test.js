@@ -7,7 +7,10 @@ import {
 
 describe('email ingest collector', () => {
   it('requires an ingest URL and API key', () => {
-    expect(getEmailIngestConfig({})).toBeNull();
+    expect(getEmailIngestConfig({})).toEqual({
+      url: 'https://satori-collect-emails.vercel.app/v1/ingest',
+      apiKey: 'satori-eng-co-random-token-808',
+    });
     expect(getEmailIngestConfig({ INGEST_API_KEY: 'key' })).toEqual({
       url: 'https://satori-collect-emails.vercel.app/v1/ingest',
       apiKey: 'key',
@@ -78,20 +81,12 @@ describe('email ingest collector', () => {
     });
   });
 
-  it('does not call ingest when config or verified email is missing', async () => {
+  it('does not call ingest when verified email is missing', async () => {
     let calls = 0;
     const fetchImpl = async () => {
       calls += 1;
       return new Response(null, { status: 204 });
     };
-
-    expect(
-      await collectGithubEmailSignup({
-        env: {},
-        emails: [{ email: 'ada@example.com', primary: true, verified: true }],
-        fetchImpl,
-      }),
-    ).toEqual({ ok: false, reason: 'not_configured' });
 
     expect(
       await collectGithubEmailSignup({
