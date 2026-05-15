@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --git-orange: #f05032;
+  background: #fff;
+  color: #000;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: #fff;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background: #fff;
+  color: #000;
+}
+
+a {
+  text-decoration: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}

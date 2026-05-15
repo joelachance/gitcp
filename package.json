@@ -18,6 +18,9 @@
     "appId": "co.satori.gitfinder",
     "productName": "GitFinder",
     "asar": true,
+    "directories": {
+      "app": "."
+    },
     "files": [
       "package.json",
       "src/main/**/*",
@@ -26,6 +29,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
       "target": [
         "dmg"
       ],
